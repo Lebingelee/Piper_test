@@ -1,0 +1,13 @@
+# Data and Library
+data/
+pyAgxArm/
+
+# Python caching
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+
+# VS Code
+.vscode/
