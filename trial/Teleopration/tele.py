@@ -2,7 +2,7 @@ from pyAgxArm import create_agx_arm_config, AgxArmFactory
 import time
 import numpy as np
 
-cfg = create_agx_arm_config(robot="piper", comm="can", channel="can_master")
+cfg = create_agx_arm_config(robot="piper", comm="can", channel="can_left_master")
 robot_leader = AgxArmFactory.create_arm(cfg)
 robot_leader.connect()
 robot_leader.set_leader_mode()
@@ -10,7 +10,7 @@ eff_leader = robot_leader.init_effector(robot_leader.OPTIONS.EFFECTOR.AGX_GRIPPE
 
 
 
-cfg = create_agx_arm_config(robot="piper", comm="can", channel="can_slave")
+cfg = create_agx_arm_config(robot="piper", comm="can", channel="can_right_slave")
 robot_follower = AgxArmFactory.create_arm(cfg)
 robot_follower.connect()
 robot_follower.set_follower_mode()

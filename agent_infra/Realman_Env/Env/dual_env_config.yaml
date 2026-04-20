@@ -1,0 +1,31 @@
+# Dual Realman Environment Configuration
+
+# 机械臂配置
+robots:
+  left:
+    ip: "192.168.2.18"
+    init_joint_pos: [0, 30, 60, 0, 90, 0]
+    init_gripper_pos: 500
+  right:
+    ip: "192.168.1.18"
+    init_joint_pos: [0, 30, 60, 0, 90, 0]
+    init_gripper_pos: 500
+
+# 通用环境配置
+common:
+  default_hz: 10
+  default_control_mode: "joint_pos"  # options: "joint_pos", "delta_ee_pose"
+
+# 相机配置 (双臂通常至少需要 3 个相机: 侧边全局 + 两个手眼)
+cameras:
+  nodes:
+    - serial_number: "346522076330"
+      role: "base_camera"
+    - serial_number: "419622073056"
+      role: "left_hand_camera"
+    - serial_number: "419522072313"
+      role: "right_hand_camera"
+
+  source_resolution: [640, 480]
+  crop_resolution: [224, 224]
+  fps: 30

@@ -1,0 +1,22 @@
+# Realman Environment Configuration
+
+robot:
+  ip: "192.168.2.18"
+  default_hz: 10
+  default_control_mode: "joint_pos"  # options: "joint_pos", "delta_ee_pose"
+
+cameras:
+  # 相机序列号与角色的映射关系
+  # 请根据实际连接的设备修改 serial_number
+  nodes:
+    - serial_number: "346522076330"  # 示例序列号
+      role: "base_camera"           # 侧边全局视角
+    - serial_number: "419622073056"  # 示例序列号
+      role: "hand_camera"           # 手眼相机
+
+  # 图像处理参数
+  source_resolution: [640, 480]    # 原始采集分辨率 (W, H)
+  crop_resolution: [224, 224]      # 裁剪/缩放后的中心区域 (W, H)
+  
+  # 曝光/白平衡等可选高级设置 (预留)
+  fps: 30

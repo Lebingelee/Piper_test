@@ -1,0 +1,51 @@
+# Dual Piper Environment Configuration
+
+robots:
+  left:
+    master_can: "can_ml"
+    follower_can: "can_sl"
+    init_joint_pos: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    init_gripper_pos: 0.05
+  right:
+    master_can: "can_mr"
+    follower_can: "can_sr"
+    init_joint_pos: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    init_gripper_pos: 0.05
+
+common:
+  default_hz: 30
+  default_control_mode: "joint"  # options: "joint", "pose", "delta_pose", "relative_pose_chunk"
+  init_wait_time: 3.0
+  relative_pose_chunk_size: 8
+  teleop_debounce_sec: 0.5
+  master_gripper_jump_threshold_m: 0.04
+  master_gripper_confirm_frames: 6
+  master_gripper_zero_epsilon_m: 0.001
+  master_gripper_zero_guard_threshold_m: 0.03
+
+cameras:
+  nodes:
+    - serial_number: "CH28822007C"
+      camera_type: "orbbec"
+      camera_backend: "auto"
+      camera_format: "MJPG"
+      auto_exposure: true
+      gain: 0
+      enable_depth: true
+      depth_required: false
+      role: "left_hand_camera"
+    - serial_number: "CH2592100GJ"
+      camera_type: "orbbec"
+      camera_backend: "auto"
+      camera_format: "MJPG"
+      auto_exposure: true
+      gain: 0
+      enable_depth: true
+      depth_required: false
+      role: "right_hand_camera"
+
+  source_resolution: [640, 480]
+  crop_resolution: [224, 224]
+  fps: 30
+  enable_depth: true
+  depth_required: false
