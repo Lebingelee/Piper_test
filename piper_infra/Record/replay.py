@@ -2,15 +2,18 @@ import argparse
 import time
 import numpy as np
 import torch
+
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from piper_infra.Env.single_piper_env import PiperTeleopEnv
 from piper_infra.Record.recoder import AbstractCameraWrapper
 import pathlib
 
+
 def replay_trajectory(dataset_path: str, episode_idx: int = -1, fps: int = None, ctrl_mode: str = "joint"):
     """
     重播指定的轨迹。
     """
+
     path = pathlib.Path(dataset_path)
     dataset = LeRobotDataset(repo_id=path.name, root=str(path))
     replay_fps = fps
@@ -28,6 +31,8 @@ def replay_trajectory(dataset_path: str, episode_idx: int = -1, fps: int = None,
             print("[Replay] 警告: 未能从数据集中找到原始频率，使用默认值 30.0 FPS") 
 
     
+
+
     
     # 2. 初始化环境 (传入控制模式)
     base_env = PiperTeleopEnv(master_can="can_master", follower_can="can_slave", ctrl_mode=ctrl_mode)
