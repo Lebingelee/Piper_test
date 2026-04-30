@@ -14,7 +14,7 @@ get_joint_angles(self) -> MessageAbstract[list[float]] | None
 import time
 from pyAgxArm import create_agx_arm_config, AgxArmFactory
 
-cfg = create_agx_arm_config(robot="piper", comm="can", channel="can_slave")
+cfg = create_agx_arm_config(robot="piper", comm="can", channel="can_mr")
 robot = AgxArmFactory.create_arm(cfg)
 robot.connect()
 

@@ -5,6 +5,7 @@ import os
 import time
 import yaml
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from pynput import keyboard
 
@@ -39,7 +40,8 @@ class PiperBaseEnv(BaseRobotEnv):
         self.relative_pose_chunk_size = int(kwargs.get("relative_pose_chunk_size", 8))
         self.default_init_joint_pos = kwargs.get("init_joint_pos", [0.0] * 6)
         self.default_init_gripper_pos = kwargs.get("init_gripper_pos", 0.05)
-        self.default_init_wait_time = kwargs.get("init_wait_time", 3.0)
+        self.default_init_wait_time = kwargs.get("init_wait_time", 0.50)
+        self.parallel_reset = bool(kwargs.get("parallel_reset", False))
 
         self._setup_meta_keys()
 
@@ -123,6 +125,39 @@ class PiperBaseEnv(BaseRobotEnv):
             grip_act = action[f"{prefix}gripper"][0]
             arm.apply_action(arm_act, grip_act, mode=self.control_mode)
 
+    def _begin_master_sync_reset(self):
+        """Hook: 子类可在主臂同步复位前暂停后台线程。"""
+        return
+
+    def _end_master_sync_reset(self):
+        """Hook: 子类可在主臂同步复位后恢复后台线程。"""
+        return
+
+    def _run_reset_jobs(self, jobs: Dict[str, Any]):
+        if not jobs:
+            return
+
+        if (not self.parallel_reset) or len(jobs) <= 1:
+            for name, fn in jobs.items():
+                fn()
+            return
+
+        errors = []
+        with ThreadPoolExecutor(max_workers=len(jobs), thread_name_prefix="piper_reset") as executor:
+            future_to_name = {
+                executor.submit(fn): name
+                for name, fn in jobs.items()
+            }
+            for future in as_completed(future_to_name):
+                name = future_to_name[future]
+                try:
+                    future.result()
+                except Exception as exc:
+                    errors.append(f"[{name}] {exc}")
+
+        if errors:
+            raise RuntimeError("并行复位存在失败项: " + " | ".join(errors))
+
     def reset_to_state(
         self,
         target_state: Dict[str, np.ndarray],
@@ -131,14 +166,27 @@ class PiperBaseEnv(BaseRobotEnv):
     ):
         actual_wait_time = self.default_init_wait_time if wait_time is None else wait_time
         print("[PiperBase] Reset: 机械臂组正在回归指定状态...")
-        for name, arm in self.arms.items():
-            prefix = self._prefix(name)
-            arm.move_to_state(
-                target_state[f"{prefix}joint_pos"],
-                target_state[f"{prefix}gripper_pos"],
-                wait_time=actual_wait_time,
-                sync_master=sync_master,
-            )
+        if sync_master:
+            self._begin_master_sync_reset()
+        try:
+            jobs = {}
+            for name, arm in self.arms.items():
+                prefix = self._prefix(name)
+                target_joint = target_state[f"{prefix}joint_pos"]
+                target_gripper = target_state[f"{prefix}gripper_pos"]
+                jobs[name] = (
+                    lambda arm=arm, target_joint=target_joint, target_gripper=target_gripper:
+                    arm.move_to_state(
+                        target_joint,
+                        target_gripper,
+                        wait_time=actual_wait_time,
+                        sync_master=sync_master,
+                    )
+                )
+            self._run_reset_jobs(jobs)
+        finally:
+            if sync_master:
+                self._end_master_sync_reset()
 
     def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None):
         if not self.is_setup:
@@ -153,15 +201,27 @@ class PiperBaseEnv(BaseRobotEnv):
         if target_state is not None:
             self.reset_to_state(target_state, wait_time=wait_time, sync_master=sync_master)
         else:
-            print("[PiperBase] Reset: 机械臂组正在回归初始位姿...")
-            for arm in self.arms.values():
-                arm.move_to_init(wait_time, sync_master=sync_master)
+            if sync_master:
+                self._begin_master_sync_reset()
+            try:
+                print("[PiperBase] Reset: 机械臂组正在回归初始位姿...")
+                jobs = {
+                    name: (
+                        lambda arm=arm: arm.move_to_init(wait_time, sync_master=sync_master)
+                    )
+                    for name, arm in self.arms.items()
+                }
+                self._run_reset_jobs(jobs)
+            finally:
+                if sync_master:
+                    self._end_master_sync_reset()
 
         return self._get_obs(), {"status": "reset_done"}
 
-    def get_safe_action(self) -> Dict[str, np.ndarray]:
-        obs = self._get_obs()
-        state = obs["state"]
+    def get_safe_action(self, state: Optional[Dict[str, np.ndarray]] = None) -> Dict[str, np.ndarray]:
+        if state is None:
+            obs = self._get_obs()
+            state = obs["state"]
         safe_action = {}
         for name in self.arm_names:
             prefix = self._prefix(name)
@@ -226,6 +286,7 @@ class PiperEnv(PiperBaseEnv):
             control_mode=self.control_mode,
             hz=self.hz,
             init_wait_time=common_cfg.get("init_wait_time", 3.0),
+            parallel_reset=common_cfg.get("parallel_reset", False),
             relative_pose_chunk_size=common_cfg.get("relative_pose_chunk_size", 8),
             **kwargs,
         )
@@ -234,6 +295,10 @@ class PiperEnv(PiperBaseEnv):
         self.tele_enabled = False
         self._lock = threading.Lock()
         self._master_running = True
+        self._master_read_pause = False
+        self._master_read_pause_depth = 0
+        self._master_read_pause_lock = threading.Lock()
+        self._teleop_before_reset = False
         self._debounce_threshold = common_cfg.get("teleop_debounce_sec", 0.5)
         self._master_gripper_jump_threshold = float(
             common_cfg.get("master_gripper_jump_threshold_m", 0.04)
@@ -247,12 +312,27 @@ class PiperEnv(PiperBaseEnv):
         self._master_gripper_zero_guard_threshold = float(
             common_cfg.get("master_gripper_zero_guard_threshold_m", 0.03)
         )
+        self._master_read_hz = float(common_cfg.get("master_read_hz", 60.0))
+        if self._master_read_hz <= 0.0:
+            self._master_read_hz = 60.0
+        self._master_read_dt = 1.0 / self._master_read_hz
+        self.master_follow = bool(common_cfg.get("master_follow", False))
+        self._sync_joint_threshold = float(common_cfg.get("sync_joint_threshold_rad", 0.12))
+        self._sync_pose_threshold = float(common_cfg.get("sync_pose_threshold", 0.03))
+        self._master_follow_warned = set()
+        if self.master_follow:
+            print(
+                "[PiperEnv] Warning: master_follow 主臂主动跟随路径已临时禁用（安全回退）。"
+                "当前将保持 master 分支稳定语义：仅 follower 跟随 leader。"
+            )
         self._master_cache = {
             name: {
                 "joint": np.zeros(7, dtype=np.float32),
                 "pose": np.zeros(7, dtype=np.float32),
                 "is_ok": False,
                 "last_ok_time": time.time(),
+                "has_leader_joint": False,
+                "last_leader_joint_time": 0.0,
                 "gripper_valid": False,
                 "gripper_candidate": np.nan,
                 "gripper_candidate_count": 0,
@@ -337,7 +417,7 @@ class PiperEnv(PiperBaseEnv):
 
     @staticmethod
     def _clip_gripper_width(width: float) -> float:
-        return float(np.clip(float(width), 0.0, 0.1))
+        return float(np.clip(float(width), 0.0, 0.2))
 
     def _filter_master_gripper(self, cache: Dict[str, Any], raw_width: float) -> float:
         width = self._clip_gripper_width(raw_width)
@@ -382,6 +462,9 @@ class PiperEnv(PiperBaseEnv):
 
     def _master_read_thread(self):
         while self._master_running:
+            if self._master_read_pause:
+                time.sleep(0.005)
+                continue
             start_t = time.perf_counter()
             try:
                 for name, arm in self.arms.items():
@@ -394,8 +477,12 @@ class PiperEnv(PiperBaseEnv):
                             cache["last_ok_time"] = time.time()
 
                         if master_state.get("has_leader_joint", False):
+                            cache["has_leader_joint"] = True
+                            cache["last_leader_joint_time"] = time.time()
                             cache["joint"][:6] = master_state["joint_pos"]
                             cache["pose"][:6] = master_state["ee_pose"]
+                        else:
+                            cache["has_leader_joint"] = False
 
                         if master_state.get("has_gripper", False):
                             gripper_width = self._filter_master_gripper(
@@ -408,7 +495,32 @@ class PiperEnv(PiperBaseEnv):
                 print(f"\n[PiperEnv] 主臂读取线程异常: {exc}\n")
 
             elapsed = time.perf_counter() - start_t
-            time.sleep(max(0.0, 0.005 - elapsed))
+            time.sleep(max(0.0, self._master_read_dt - elapsed))
+
+    def _begin_master_sync_reset(self):
+        with self._master_read_pause_lock:
+            self._master_read_pause_depth += 1
+            self._master_read_pause = True
+            if self._master_read_pause_depth == 1:
+                self._teleop_before_reset = bool(self.tele_enabled)
+        if self.tele_enabled:
+            print("[PiperEnv] Reset期间暂停Teleop输入。")
+        self.tele_enabled = False
+        print("[PiperEnv] 主臂读取线程已暂停，优先执行主臂复位。")
+        time.sleep(0.03)
+
+    def _end_master_sync_reset(self):
+        restored_teleop = None
+        with self._master_read_pause_lock:
+            self._master_read_pause_depth = max(0, self._master_read_pause_depth - 1)
+            if self._master_read_pause_depth == 0:
+                self._master_read_pause = False
+                restored_teleop = bool(self._teleop_before_reset)
+                self._teleop_before_reset = False
+        if restored_teleop is not None:
+            self.tele_enabled = restored_teleop
+            print(f"[PiperEnv] Reset后恢复Teleop状态: {'ON' if self.tele_enabled else 'OFF'}")
+        print("[PiperEnv] 主臂读取线程已恢复。")
 
     def _check_under_control(self, name: str) -> bool:
         current_time = time.time()
@@ -417,8 +529,25 @@ class PiperEnv(PiperBaseEnv):
             hardware_ok = cache["is_ok"] or (
                 current_time - cache["last_ok_time"] < self._debounce_threshold
             )
-            #print(hardware_ok)
-            return self.tele_enabled and hardware_ok
+            leader_joint_ready = cache.get("has_leader_joint", False) or (
+                current_time - float(cache.get("last_leader_joint_time", 0.0))
+                < self._debounce_threshold
+            )
+            return self.tele_enabled and hardware_ok and leader_joint_ready
+
+    def _check_hardware_override(self, name: str) -> bool:
+        """不依赖 tele_enabled 的硬件接管检测。"""
+        current_time = time.time()
+        with self._lock:
+            cache = self._master_cache[name]
+            hardware_ok = cache["is_ok"] or (
+                current_time - cache["last_ok_time"] < self._debounce_threshold
+            )
+            leader_joint_ready = cache.get("has_leader_joint", False) or (
+                current_time - float(cache.get("last_leader_joint_time", 0.0))
+                < self._debounce_threshold
+            )
+            return hardware_ok and leader_joint_ready
 
     def _get_under_control_obs(self) -> Dict[str, np.ndarray]:
         return {
@@ -431,17 +560,46 @@ class PiperEnv(PiperBaseEnv):
         obs["under_control"] = self._get_under_control_obs()
         return obs
 
+    def _is_follower_synced(self, name: str, expert_arm_action: np.ndarray) -> bool:
+        follower_state = self.arms[name].get_state()
+        if self.control_mode == "joint":
+            err = np.max(np.abs(expert_arm_action - follower_state["joint_pos"]))
+            return bool(err <= self._sync_joint_threshold)
+        if self.control_mode == "pose":
+            err = np.linalg.norm(expert_arm_action - follower_state["ee_pose"])
+            return bool(err <= self._sync_pose_threshold)
+        if self.control_mode == "delta_pose":
+            err = np.linalg.norm(expert_arm_action)
+            return bool(err <= self._sync_pose_threshold)
+
+        if expert_arm_action.shape[0] >= 6:
+            err = np.linalg.norm(expert_arm_action[:6])
+            return bool(err <= self._sync_pose_threshold)
+        return True
+
+    def _mirror_follower_to_master(self, obs: Dict[str, Any], intervened: Dict[str, bool]):
+        # 安全回退：暂时禁用主臂主动跟随，避免主臂锁住/异常位姿。
+        for arm in self.arms.values():
+            arm.end_master_follow()
+
     def step(self, action: Dict[str, np.ndarray]):
+        policy_action = {k: v.copy() for k, v in action.items()}
         executed_action = {k: v.copy() for k, v in action.items()}
         intervened = {}
+        action_source = {}
+        syncing = {}
 
         for name in self.arm_names:
             prefix = self._prefix(name)
             is_intervened = self._check_under_control(name)
             intervened[name] = is_intervened
             if not is_intervened:
+                action_source[name] = "policy"
+                syncing[name] = False
                 continue
 
+            # 一旦检测到人工拖动，立即解除主臂跟随从臂关系，避免信息错位。
+            self.arms[name].end_master_follow()
             with self._lock:
                 cache = self._master_cache[name]
                 if self.control_mode == "joint":
@@ -470,12 +628,29 @@ class PiperEnv(PiperBaseEnv):
                         self.arms[name].last_follower_gripper_cmd
                     )
 
+            is_syncing = not self._is_follower_synced(name, expert_val)
+            syncing[name] = is_syncing
+            action_source[name] = "sync" if is_syncing else "expert"
             executed_action[f"{prefix}arm"] = expert_val
             executed_action[f"{prefix}gripper"] = np.array([expert_gripper], dtype=np.float32)
 
         obs, reward, terminated, truncated, info = super().step(executed_action)
+        self._mirror_follower_to_master(obs, intervened)
         info["actual_action"] = executed_action
+        info["policy_action"] = policy_action
         info["intervened"] = intervened if len(self.arm_names) > 1 else intervened[self.arm_names[0]]
+        info["intervened_map"] = intervened
+        info["action_source"] = action_source if len(self.arm_names) > 1 else action_source[self.arm_names[0]]
+        info["action_source_map"] = action_source
+        info["syncing"] = syncing if len(self.arm_names) > 1 else syncing[self.arm_names[0]]
+        info["syncing_map"] = syncing
+        info["master_follow_enabled"] = self.master_follow
+        action_type_map = {
+            name: (0 if action_source[name] == "policy" else 1 if action_source[name] == "expert" else 2)
+            for name in self.arm_names
+        }
+        info["action_type"] = action_type_map if len(self.arm_names) > 1 else action_type_map[self.arm_names[0]]
+        info["action_type_map"] = action_type_map
         return obs, reward, terminated, truncated, info
 
     def close(self):
@@ -484,4 +659,6 @@ class PiperEnv(PiperBaseEnv):
             self.listener.stop()
         if hasattr(self, "read_thread"):
             self.read_thread.join(timeout=1.0)
+        for arm in self.arms.values():
+            arm.end_master_follow()
         super().close()

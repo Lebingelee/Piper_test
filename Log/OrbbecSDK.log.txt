@@ -340,3 +340,575 @@
 [04/20 15:45:39.278459][info][875748][DeviceManager.cpp:339] Enable net device enumeration: true
 [04/20 15:45:41.283940][info][875748][DeviceManager.cpp:25] Current device(s) list: (0)
 [04/20 15:45:41.285450][warning][875748][ObException.cpp:8] Device not found by serial number: CH2592100GJ
+[04/20 16:41:26.790124][error][901006][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 16:41:26.790216][error][901006][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 16:41:26.865619][error][901006][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 16:41:26.865688][error][901006][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 16:41:26.866027][error][901006][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 16:41:26.866042][error][901006][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 16:41:26.938531][info][901006][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/20 16:41:26.938591][info][901006][DeviceManager.cpp:25] Current found device(s): (0)
+[04/20 16:41:26.938604][info][901006][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/20 16:41:28.944768][info][901006][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/20 16:41:28.951726][warning][901006][ObException.cpp:8] Device not found by serial number: CH28822007C
+[04/20 16:41:30.233853][error][901006][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 16:41:30.233936][error][901006][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 16:41:30.420345][error][901006][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 16:41:30.420413][error][901006][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 16:41:30.421254][error][901006][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 16:41:30.421300][error][901006][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 16:41:30.490487][info][901006][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/20 16:41:30.490540][info][901006][DeviceManager.cpp:25] Current found device(s): (0)
+[04/20 16:41:30.490553][info][901006][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/20 16:41:32.492709][info][901006][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/20 16:41:32.494445][warning][901006][ObException.cpp:8] Device not found by serial number: CH2592100GJ
+[04/20 21:50:25.401396][error][1015277][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 21:50:25.401479][error][1015277][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 21:50:25.477391][error][1015277][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 21:50:25.477452][error][1015277][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 21:50:25.477827][error][1015277][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 21:50:25.477842][error][1015277][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 21:50:25.554236][info][1015277][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/20 21:50:25.554297][info][1015277][DeviceManager.cpp:25] Current found device(s): (0)
+[04/20 21:50:25.554309][info][1015277][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/20 21:50:27.560061][info][1015277][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/20 21:50:27.561707][warning][1015277][ObException.cpp:8] Device not found by serial number: CH28822007C
+[04/20 21:50:28.893711][error][1015277][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 21:50:28.893803][error][1015277][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 21:50:29.075599][error][1015277][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 21:50:29.075686][error][1015277][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 21:50:29.076142][error][1015277][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 21:50:29.076155][error][1015277][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 21:50:29.150301][info][1015277][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/20 21:50:29.150358][info][1015277][DeviceManager.cpp:25] Current found device(s): (0)
+[04/20 21:50:29.150370][info][1015277][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/20 21:50:31.156183][info][1015277][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/20 21:50:31.159591][warning][1015277][ObException.cpp:8] Device not found by serial number: CH2592100GJ
+[04/20 21:53:17.849592][error][1016825][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 21:53:17.849678][error][1016825][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 21:53:17.925189][error][1016825][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 21:53:17.925215][error][1016825][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 21:53:17.925567][error][1016825][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 21:53:17.925582][error][1016825][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 21:53:18.002162][info][1016825][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/20 21:53:18.002234][info][1016825][DeviceManager.cpp:25] Current found device(s): (0)
+[04/20 21:53:18.002247][info][1016825][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/20 21:53:20.009603][info][1016825][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/20 21:53:20.012791][warning][1016825][ObException.cpp:8] Device not found by serial number: CH28822007C
+[04/20 21:53:21.229663][error][1016825][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 21:53:21.229743][error][1016825][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 21:53:21.407242][error][1016825][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 21:53:21.407322][error][1016825][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 21:53:21.407868][error][1016825][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 21:53:21.407923][error][1016825][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 21:53:21.478480][info][1016825][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/20 21:53:21.478547][info][1016825][DeviceManager.cpp:25] Current found device(s): (0)
+[04/20 21:53:21.478563][info][1016825][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/20 21:53:23.485138][info][1016825][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/20 21:53:23.487073][warning][1016825][ObException.cpp:8] Device not found by serial number: CH2592100GJ
+[04/20 22:10:01.349469][error][1025231][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:10:01.349591][error][1025231][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:10:01.417698][error][1025231][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:10:01.417765][error][1025231][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:10:01.418335][error][1025231][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:10:01.418384][error][1025231][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:10:01.486639][info][1025231][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/20 22:10:01.486695][info][1025231][DeviceManager.cpp:25] Current found device(s): (0)
+[04/20 22:10:01.486707][info][1025231][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/20 22:10:03.494492][info][1025231][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/20 22:10:03.497347][warning][1025231][ObException.cpp:8] Device not found by serial number: CH28822007C
+[04/20 22:10:04.821762][error][1025231][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:10:04.821845][error][1025231][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:10:05.007844][error][1025231][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:10:05.007877][error][1025231][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:10:05.008104][error][1025231][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:10:05.008109][error][1025231][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:10:05.082732][info][1025231][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/20 22:10:05.082787][info][1025231][DeviceManager.cpp:25] Current found device(s): (0)
+[04/20 22:10:05.082800][info][1025231][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/20 22:10:07.088429][info][1025231][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/20 22:10:07.089959][warning][1025231][ObException.cpp:8] Device not found by serial number: CH2592100GJ
+[04/20 22:14:33.209350][error][1027271][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:14:33.209439][error][1027271][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:14:33.277718][error][1027271][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:14:33.277782][error][1027271][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:14:33.278326][error][1027271][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:14:33.278340][error][1027271][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:14:33.346697][info][1027271][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/20 22:14:33.346776][info][1027271][DeviceManager.cpp:25] Current found device(s): (0)
+[04/20 22:14:33.346792][info][1027271][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/20 22:14:35.359247][info][1027271][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/20 22:14:35.360876][warning][1027271][ObException.cpp:8] Device not found by serial number: CH28822007C
+[04/20 22:14:36.613737][error][1027271][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:14:36.613824][error][1027271][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:14:36.800216][error][1027271][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:14:36.800280][error][1027271][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:14:36.800835][error][1027271][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:14:36.800883][error][1027271][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:14:36.870438][info][1027271][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/20 22:14:36.870490][info][1027271][DeviceManager.cpp:25] Current found device(s): (0)
+[04/20 22:14:36.870503][info][1027271][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/20 22:14:38.877154][info][1027271][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/20 22:14:38.878853][warning][1027271][ObException.cpp:8] Device not found by serial number: CH2592100GJ
+[04/20 22:27:35.409691][error][1033073][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:27:35.409782][error][1033073][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:27:35.481790][error][1033073][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:27:35.481858][error][1033073][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:27:35.482274][error][1033073][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:27:35.482290][error][1033073][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:27:35.554198][info][1033073][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/20 22:27:35.554264][info][1033073][DeviceManager.cpp:25] Current found device(s): (0)
+[04/20 22:27:35.554277][info][1033073][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/20 22:27:37.560893][info][1033073][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/20 22:27:37.562366][warning][1033073][ObException.cpp:8] Device not found by serial number: CH28822007C
+[04/20 22:27:38.849753][error][1033073][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:27:38.849835][error][1033073][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:27:39.031674][error][1033073][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:27:39.031703][error][1033073][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:27:39.032063][error][1033073][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:27:39.032069][error][1033073][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:27:39.102296][info][1033073][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/20 22:27:39.102348][info][1033073][DeviceManager.cpp:25] Current found device(s): (0)
+[04/20 22:27:39.102362][info][1033073][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/20 22:27:41.125520][info][1033073][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/20 22:27:41.127411][warning][1033073][ObException.cpp:8] Device not found by serial number: CH2592100GJ
+[04/20 22:31:28.561349][error][1035206][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:31:28.561474][error][1035206][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:31:28.629846][error][1035206][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:31:28.629909][error][1035206][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:31:28.630496][error][1035206][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:31:28.630545][error][1035206][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:31:28.698325][info][1035206][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/20 22:31:28.698384][info][1035206][DeviceManager.cpp:25] Current found device(s): (0)
+[04/20 22:31:28.698395][info][1035206][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/20 22:31:30.711272][info][1035206][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/20 22:31:30.712871][warning][1035206][ObException.cpp:8] Device not found by serial number: CH28822007C
+[04/20 22:31:32.017423][error][1035206][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:31:32.017507][error][1035206][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:31:32.199122][error][1035206][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:31:32.199184][error][1035206][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:31:32.199553][error][1035206][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:31:32.199568][error][1035206][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:31:32.273657][info][1035206][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/20 22:31:32.273678][info][1035206][DeviceManager.cpp:25] Current found device(s): (0)
+[04/20 22:31:32.273682][info][1035206][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/20 22:31:34.280434][info][1035206][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/20 22:31:34.282110][warning][1035206][ObException.cpp:8] Device not found by serial number: CH2592100GJ
+[04/20 22:35:57.613688][error][1037537][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:35:57.613779][error][1037537][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:35:57.685393][error][1037537][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:35:57.685451][error][1037537][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:35:57.685812][error][1037537][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:35:57.685826][error][1037537][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:35:57.762295][info][1037537][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/20 22:35:57.762363][info][1037537][DeviceManager.cpp:25] Current found device(s): (0)
+[04/20 22:35:57.762375][info][1037537][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/20 22:35:59.768224][info][1037537][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/20 22:35:59.771889][warning][1037537][ObException.cpp:8] Device not found by serial number: CH28822007C
+[04/20 22:36:01.045532][error][1037537][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:36:01.045619][error][1037537][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:36:01.224926][error][1037537][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:36:01.224988][error][1037537][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:36:01.225867][error][1037537][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:36:01.225928][error][1037537][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:36:01.294512][info][1037537][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/20 22:36:01.294564][info][1037537][DeviceManager.cpp:25] Current found device(s): (0)
+[04/20 22:36:01.294576][info][1037537][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/20 22:36:03.300059][info][1037537][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/20 22:36:03.301590][warning][1037537][ObException.cpp:8] Device not found by serial number: CH2592100GJ
+[04/20 22:36:46.773326][error][1038109][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:36:46.773408][error][1038109][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:36:46.841191][error][1038109][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:36:46.841212][error][1038109][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:36:46.841531][error][1038109][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:36:46.841536][error][1038109][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:36:46.910204][info][1038109][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/20 22:36:46.910263][info][1038109][DeviceManager.cpp:25] Current found device(s): (0)
+[04/20 22:36:46.910275][info][1038109][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/20 22:36:48.916993][info][1038109][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/20 22:36:48.919637][warning][1038109][ObException.cpp:8] Device not found by serial number: CH28822007C
+[04/20 22:36:50.197740][error][1038109][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:36:50.197827][error][1038109][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:36:50.383553][error][1038109][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:36:50.383635][error][1038109][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:36:50.383985][error][1038109][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:36:50.383998][error][1038109][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:36:50.453948][info][1038109][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/20 22:36:50.453998][info][1038109][DeviceManager.cpp:25] Current found device(s): (0)
+[04/20 22:36:50.454010][info][1038109][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/20 22:36:52.458535][info][1038109][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/20 22:36:52.460755][warning][1038109][ObException.cpp:8] Device not found by serial number: CH2592100GJ
+[04/20 22:37:41.645771][error][1038704][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:37:41.645862][error][1038704][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:37:41.713864][error][1038704][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:37:41.713943][error][1038704][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:37:41.714515][error][1038704][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:37:41.714555][error][1038704][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:37:41.786364][info][1038704][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/20 22:37:41.786441][info][1038704][DeviceManager.cpp:25] Current found device(s): (0)
+[04/20 22:37:41.786454][info][1038704][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/20 22:37:43.800758][info][1038704][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/20 22:37:43.802618][warning][1038704][ObException.cpp:8] Device not found by serial number: CH28822007C
+[04/20 22:37:45.085630][error][1038704][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:37:45.085714][error][1038704][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:37:45.267445][error][1038704][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:37:45.267471][error][1038704][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:37:45.267876][error][1038704][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:37:45.267888][error][1038704][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:37:45.338464][info][1038704][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/20 22:37:45.338513][info][1038704][DeviceManager.cpp:25] Current found device(s): (0)
+[04/20 22:37:45.338527][info][1038704][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/20 22:37:47.345438][info][1038704][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/20 22:37:47.346523][warning][1038704][ObException.cpp:8] Device not found by serial number: CH2592100GJ
+[04/20 22:41:35.477613][error][1040634][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:41:35.477726][error][1040634][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:41:35.545455][error][1040634][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:41:35.545525][error][1040634][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:41:35.545943][error][1040634][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:41:35.545956][error][1040634][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:41:35.618330][info][1040634][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/20 22:41:35.618388][info][1040634][DeviceManager.cpp:25] Current found device(s): (0)
+[04/20 22:41:35.618400][info][1040634][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/20 22:41:37.623988][info][1040634][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/20 22:41:37.625852][warning][1040634][ObException.cpp:8] Device not found by serial number: CH27152011E
+[04/20 22:41:39.091223][error][1040634][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:41:39.091302][error][1040634][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:41:39.161825][error][1040634][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:41:39.161889][error][1040634][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:41:39.162572][error][1040634][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:41:39.162620][error][1040634][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:41:39.230239][info][1040634][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/20 22:41:39.230289][info][1040634][DeviceManager.cpp:25] Current found device(s): (0)
+[04/20 22:41:39.230301][info][1040634][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/20 22:41:41.236719][info][1040634][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/20 22:41:41.238494][warning][1040634][ObException.cpp:8] Device not found by serial number: CH28822007C
+[04/20 22:41:42.410199][error][1040634][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:41:42.410273][error][1040634][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:41:42.652503][error][1040634][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:41:42.652565][error][1040634][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:41:42.652913][error][1040634][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:41:42.652927][error][1040634][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:41:42.729977][info][1040634][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/20 22:41:42.730025][info][1040634][DeviceManager.cpp:25] Current found device(s): (0)
+[04/20 22:41:42.730037][info][1040634][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/20 22:41:44.735400][info][1040634][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/20 22:41:44.737386][warning][1040634][ObException.cpp:8] Device not found by serial number: CH2592100GJ
+[04/20 22:42:56.813811][error][1041413][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:42:56.813903][error][1041413][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:42:56.881814][error][1041413][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:42:56.881876][error][1041413][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:42:56.882436][error][1041413][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:42:56.882484][error][1041413][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:42:56.958184][info][1041413][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/20 22:42:56.958237][info][1041413][DeviceManager.cpp:25] Current found device(s): (0)
+[04/20 22:42:56.958250][info][1041413][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/20 22:42:58.963878][info][1041413][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/20 22:42:58.967003][warning][1041413][ObException.cpp:8] Device not found by serial number: CH27152011E
+[04/20 22:43:00.620066][error][1041413][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:43:00.620168][error][1041413][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:43:00.689332][error][1041413][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:43:00.689389][error][1041413][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:43:00.689747][error][1041413][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:43:00.689762][error][1041413][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:43:00.757961][info][1041413][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/20 22:43:00.758018][info][1041413][DeviceManager.cpp:25] Current found device(s): (0)
+[04/20 22:43:00.758031][info][1041413][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/20 22:43:02.765620][info][1041413][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/20 22:43:02.767387][warning][1041413][ObException.cpp:8] Device not found by serial number: CH28822007C
+[04/20 22:43:04.174058][error][1041413][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:43:04.174114][error][1041413][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:43:04.407832][error][1041413][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:43:04.407902][error][1041413][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:43:04.408509][error][1041413][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/20 22:43:04.408558][error][1041413][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/20 22:43:04.482278][info][1041413][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/20 22:43:04.482345][info][1041413][DeviceManager.cpp:25] Current found device(s): (0)
+[04/20 22:43:04.482357][info][1041413][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/20 22:43:06.489491][info][1041413][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/20 22:43:06.492420][warning][1041413][ObException.cpp:8] Device not found by serial number: CH2592100GJ
+[04/21 10:42:48.745427][error][1305653][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 10:42:48.745517][error][1305653][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 10:42:48.817678][error][1305653][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 10:42:48.817739][error][1305653][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 10:42:48.818075][error][1305653][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 10:42:48.818087][error][1305653][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 10:42:48.890700][info][1305653][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/21 10:42:48.890762][info][1305653][DeviceManager.cpp:25] Current found device(s): (0)
+[04/21 10:42:48.890774][info][1305653][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/21 10:42:50.897590][info][1305653][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/21 10:42:50.904574][warning][1305653][ObException.cpp:8] Device not found by serial number: CH27152011E
+[04/21 10:42:52.780039][error][1305653][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 10:42:52.780127][error][1305653][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 10:42:52.850393][error][1305653][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 10:42:52.850455][error][1305653][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 10:42:52.851001][error][1305653][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 10:42:52.851049][error][1305653][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 10:42:52.921948][info][1305653][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/21 10:42:52.922003][info][1305653][DeviceManager.cpp:25] Current found device(s): (0)
+[04/21 10:42:52.922014][info][1305653][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/21 10:42:54.927341][info][1305653][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/21 10:42:54.929054][warning][1305653][ObException.cpp:8] Device not found by serial number: CH28822007C
+[04/21 10:42:56.402127][error][1305653][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 10:42:56.402176][error][1305653][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 10:42:56.653763][error][1305653][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 10:42:56.653828][error][1305653][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 10:42:56.654154][error][1305653][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 10:42:56.654167][error][1305653][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 10:42:56.725952][info][1305653][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/21 10:42:56.726001][info][1305653][DeviceManager.cpp:25] Current found device(s): (0)
+[04/21 10:42:56.726012][info][1305653][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/21 10:42:58.730947][info][1305653][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/21 10:42:58.732324][warning][1305653][ObException.cpp:8] Device not found by serial number: CH2592100GJ
+[04/21 10:58:38.717677][error][1313226][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 10:58:38.717790][error][1313226][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 10:58:38.785885][error][1313226][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 10:58:38.785946][error][1313226][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 10:58:38.786532][error][1313226][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 10:58:38.786580][error][1313226][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 10:58:38.858291][info][1313226][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/21 10:58:38.858350][info][1313226][DeviceManager.cpp:25] Current found device(s): (0)
+[04/21 10:58:38.858362][info][1313226][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/21 10:58:40.865469][info][1313226][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/21 10:58:40.867780][warning][1313226][ObException.cpp:8] Device not found by serial number: CH27152011E
+[04/21 10:58:42.312219][error][1313226][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 10:58:42.312307][error][1313226][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 10:58:42.381830][error][1313226][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 10:58:42.381889][error][1313226][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 10:58:42.382462][error][1313226][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 10:58:42.382475][error][1313226][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 10:58:42.449433][info][1313226][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/21 10:58:42.449459][info][1313226][DeviceManager.cpp:25] Current found device(s): (0)
+[04/21 10:58:42.449466][info][1313226][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/21 10:58:44.454947][info][1313226][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/21 10:58:44.456579][warning][1313226][ObException.cpp:8] Device not found by serial number: CH28822007C
+[04/21 10:58:45.596391][error][1313226][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 10:58:45.596467][error][1313226][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 10:58:45.847555][error][1313226][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 10:58:45.847659][error][1313226][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 10:58:45.848247][error][1313226][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 10:58:45.848288][error][1313226][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 10:58:45.918145][info][1313226][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/21 10:58:45.918213][info][1313226][DeviceManager.cpp:25] Current found device(s): (0)
+[04/21 10:58:45.918232][info][1313226][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/21 10:58:47.924969][info][1313226][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/21 10:58:47.926831][warning][1313226][ObException.cpp:8] Device not found by serial number: CH2592100GJ
+[04/21 14:10:10.273868][error][1387168][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 14:10:10.273975][error][1387168][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 14:10:10.341379][error][1387168][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 14:10:10.341446][error][1387168][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 14:10:10.341906][error][1387168][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 14:10:10.341919][error][1387168][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 14:10:10.414227][info][1387168][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/21 14:10:10.414279][info][1387168][DeviceManager.cpp:25] Current found device(s): (0)
+[04/21 14:10:10.414292][info][1387168][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/21 14:10:12.434355][info][1387168][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/21 14:10:12.436292][warning][1387168][ObException.cpp:8] Device not found by serial number: CH27152011E
+[04/21 14:10:13.834344][error][1387168][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 14:10:13.834451][error][1387168][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 14:10:13.905745][error][1387168][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 14:10:13.905811][error][1387168][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 14:10:13.906158][error][1387168][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 14:10:13.906172][error][1387168][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 14:10:13.974055][info][1387168][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/21 14:10:13.974110][info][1387168][DeviceManager.cpp:25] Current found device(s): (0)
+[04/21 14:10:13.974123][info][1387168][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/21 14:10:15.981134][info][1387168][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/21 14:10:15.982876][warning][1387168][ObException.cpp:8] Device not found by serial number: CH28822007C
+[04/21 14:10:17.126304][error][1387168][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 14:10:17.126327][error][1387168][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 14:10:17.379480][error][1387168][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 14:10:17.379544][error][1387168][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 14:10:17.380248][error][1387168][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 14:10:17.380299][error][1387168][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 14:10:17.450435][info][1387168][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/21 14:10:17.450488][info][1387168][DeviceManager.cpp:25] Current found device(s): (0)
+[04/21 14:10:17.450500][info][1387168][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/21 14:10:19.456894][info][1387168][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/21 14:10:19.459025][warning][1387168][ObException.cpp:8] Device not found by serial number: CH2592100GJ
+[04/21 14:18:11.553376][error][1391452][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 14:18:11.553468][error][1391452][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 14:18:11.621599][error][1391452][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 14:18:11.621660][error][1391452][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 14:18:11.622089][error][1391452][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 14:18:11.622103][error][1391452][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 14:18:11.690440][info][1391452][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/21 14:18:11.690503][info][1391452][DeviceManager.cpp:25] Current found device(s): (0)
+[04/21 14:18:11.690517][info][1391452][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/21 14:18:13.697157][info][1391452][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/21 14:18:13.699082][warning][1391452][ObException.cpp:8] Device not found by serial number: CH27152011E
+[04/21 14:18:15.353655][error][1391452][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 14:18:15.353745][error][1391452][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 14:18:15.421826][error][1391452][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 14:18:15.421889][error][1391452][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 14:18:15.422425][error][1391452][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 14:18:15.422473][error][1391452][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 14:18:15.490388][info][1391452][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/21 14:18:15.490439][info][1391452][DeviceManager.cpp:25] Current found device(s): (0)
+[04/21 14:18:15.490451][info][1391452][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/21 14:18:17.497051][info][1391452][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/21 14:18:17.499712][warning][1391452][ObException.cpp:8] Device not found by serial number: CH28822007C
+[04/21 14:18:18.739657][error][1391452][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 14:18:18.739740][error][1391452][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 14:18:18.977242][error][1391452][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 14:18:18.977307][error][1391452][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 14:18:18.977819][error][1391452][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 14:18:18.977869][error][1391452][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 14:18:19.045939][info][1391452][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/21 14:18:19.046001][info][1391452][DeviceManager.cpp:25] Current found device(s): (0)
+[04/21 14:18:19.046014][info][1391452][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/21 14:18:21.053512][info][1391452][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/21 14:18:21.057150][warning][1391452][ObException.cpp:8] Device not found by serial number: CH2592100GJ
+[04/21 14:19:57.365576][error][1392404][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 14:19:57.365669][error][1392404][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 14:19:57.433835][error][1392404][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 14:19:57.433896][error][1392404][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 14:19:57.434389][error][1392404][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 14:19:57.434402][error][1392404][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 14:19:57.502734][info][1392404][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/21 14:19:57.502812][info][1392404][DeviceManager.cpp:25] Current found device(s): (0)
+[04/21 14:19:57.502829][info][1392404][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/21 14:19:59.508910][info][1392404][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/21 14:19:59.511244][warning][1392404][ObException.cpp:8] Device not found by serial number: CH27152011E
+[04/21 14:20:00.903915][error][1392404][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 14:20:00.903999][error][1392404][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 14:20:00.977742][error][1392404][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 14:20:00.977801][error][1392404][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 14:20:00.978156][error][1392404][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 14:20:00.978170][error][1392404][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 14:20:01.045873][info][1392404][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/21 14:20:01.045940][info][1392404][DeviceManager.cpp:25] Current found device(s): (0)
+[04/21 14:20:01.045952][info][1392404][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/21 14:20:03.052335][info][1392404][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/21 14:20:03.054218][warning][1392404][ObException.cpp:8] Device not found by serial number: CH28822007C
+[04/21 14:20:04.289632][error][1392404][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 14:20:04.289708][error][1392404][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 14:20:04.534993][error][1392404][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 14:20:04.535049][error][1392404][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 14:20:04.535347][error][1392404][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 14:20:04.535359][error][1392404][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 14:20:04.606480][info][1392404][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/21 14:20:04.606535][info][1392404][DeviceManager.cpp:25] Current found device(s): (0)
+[04/21 14:20:04.606548][info][1392404][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/21 14:20:06.610425][info][1392404][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/21 14:20:06.612764][warning][1392404][ObException.cpp:8] Device not found by serial number: CH2592100GJ
+[04/21 14:21:16.045352][error][1393313][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 14:21:16.045446][error][1393313][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 14:21:16.113428][error][1393313][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 14:21:16.113495][error][1393313][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 14:21:16.113859][error][1393313][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 14:21:16.113874][error][1393313][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 14:21:16.186211][info][1393313][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/21 14:21:16.186267][info][1393313][DeviceManager.cpp:25] Current found device(s): (0)
+[04/21 14:21:16.186279][info][1393313][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/21 14:21:18.209964][info][1393313][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/21 14:21:18.211991][warning][1393313][ObException.cpp:8] Device not found by serial number: CH27152011E
+[04/21 14:21:19.610953][error][1393313][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 14:21:19.611037][error][1393313][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 14:21:19.678334][error][1393313][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 14:21:19.678399][error][1393313][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 14:21:19.679005][error][1393313][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 14:21:19.679053][error][1393313][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 14:21:19.746379][info][1393313][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/21 14:21:19.746431][info][1393313][DeviceManager.cpp:25] Current found device(s): (0)
+[04/21 14:21:19.746444][info][1393313][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/21 14:21:21.755679][info][1393313][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/21 14:21:21.759686][warning][1393313][ObException.cpp:8] Device not found by serial number: CH28822007C
+[04/21 14:21:22.996826][error][1393313][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 14:21:22.996904][error][1393313][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 14:21:23.244623][error][1393313][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 14:21:23.244713][error][1393313][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 14:21:23.245286][error][1393313][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 14:21:23.245310][error][1393313][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 14:21:23.318836][info][1393313][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/21 14:21:23.318888][info][1393313][DeviceManager.cpp:25] Current found device(s): (0)
+[04/21 14:21:23.318902][info][1393313][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/21 14:21:25.325020][info][1393313][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/21 14:21:25.326790][warning][1393313][ObException.cpp:8] Device not found by serial number: CH2592100GJ
+[04/21 21:32:12.505346][error][1599515][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 21:32:12.505434][error][1599515][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 21:32:12.577413][error][1599515][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 21:32:12.577478][error][1599515][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 21:32:12.577849][error][1599515][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 21:32:12.577863][error][1599515][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 21:32:12.652656][info][1599515][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/21 21:32:12.652725][info][1599515][DeviceManager.cpp:25] Current found device(s): (0)
+[04/21 21:32:12.652742][info][1599515][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/21 21:32:14.659057][info][1599515][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/21 21:32:14.660116][warning][1599515][ObException.cpp:8] Device not found by serial number: CH27152011E
+[04/21 21:32:16.135623][error][1599515][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 21:32:16.135703][error][1599515][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 21:32:16.209733][error][1599515][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 21:32:16.209802][error][1599515][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 21:32:16.210311][error][1599515][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 21:32:16.210376][error][1599515][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 21:32:16.286005][info][1599515][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/21 21:32:16.286052][info][1599515][DeviceManager.cpp:25] Current found device(s): (0)
+[04/21 21:32:16.286065][info][1599515][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/21 21:32:18.290868][info][1599515][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/21 21:32:18.291681][warning][1599515][ObException.cpp:8] Device not found by serial number: CH28822007C
+[04/21 21:35:05.377701][error][1601067][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 21:35:05.377793][error][1601067][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 21:35:05.445939][error][1601067][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 21:35:05.446005][error][1601067][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 21:35:05.446524][error][1601067][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 21:35:05.446539][error][1601067][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 21:35:05.514758][info][1601067][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/21 21:35:05.514842][info][1601067][DeviceManager.cpp:25] Current found device(s): (0)
+[04/21 21:35:05.514863][info][1601067][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/21 21:35:07.520795][info][1601067][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/21 21:35:07.521911][warning][1601067][ObException.cpp:8] Device not found by serial number: CH27152011E
+[04/21 21:35:08.955029][error][1601067][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 21:35:08.955112][error][1601067][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 21:35:09.029716][error][1601067][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 21:35:09.029790][error][1601067][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 21:35:09.030261][error][1601067][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 21:35:09.030312][error][1601067][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 21:35:09.097926][info][1601067][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/21 21:35:09.097991][info][1601067][DeviceManager.cpp:25] Current found device(s): (0)
+[04/21 21:35:09.098004][info][1601067][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/21 21:35:11.105044][info][1601067][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/21 21:35:11.106178][warning][1601067][ObException.cpp:8] Device not found by serial number: CH28822007C
+[04/21 21:46:48.193373][error][1606390][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 21:46:48.193480][error][1606390][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 21:46:48.261335][error][1606390][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 21:46:48.261393][error][1606390][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 21:46:48.261720][error][1606390][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 21:46:48.261732][error][1606390][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 21:46:48.334290][info][1606390][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/21 21:46:48.334348][info][1606390][DeviceManager.cpp:25] Current found device(s): (0)
+[04/21 21:46:48.334360][info][1606390][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/21 21:46:50.341096][info][1606390][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/21 21:46:50.344476][warning][1606390][ObException.cpp:8] Device not found by serial number: CH27152011E
+[04/21 21:46:51.801980][error][1606390][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 21:46:51.802064][error][1606390][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 21:46:51.869729][error][1606390][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 21:46:51.869789][error][1606390][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 21:46:51.870432][error][1606390][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 21:46:51.870499][error][1606390][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 21:46:51.937985][info][1606390][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/21 21:46:51.938035][info][1606390][DeviceManager.cpp:25] Current found device(s): (0)
+[04/21 21:46:51.938048][info][1606390][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/21 21:46:53.943739][info][1606390][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/21 21:46:53.946123][warning][1606390][ObException.cpp:8] Device not found by serial number: CH28822007C
+[04/21 21:47:22.093339][error][1606820][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 21:47:22.093426][error][1606820][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 21:47:22.161369][error][1606820][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 21:47:22.161433][error][1606820][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 21:47:22.161826][error][1606820][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 21:47:22.161844][error][1606820][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 21:47:22.230563][info][1606820][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/21 21:47:22.230625][info][1606820][DeviceManager.cpp:25] Current found device(s): (0)
+[04/21 21:47:22.230637][info][1606820][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/21 21:47:24.233888][info][1606820][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/21 21:47:24.238698][warning][1606820][ObException.cpp:8] Device not found by serial number: CH27152011E
+[04/21 21:47:25.674412][error][1606820][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 21:47:25.674505][error][1606820][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 21:47:25.745462][error][1606820][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 21:47:25.745523][error][1606820][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 21:47:25.745900][error][1606820][UsbEnumeratorLibusb.cpp:159] Invalid descriptor index: 0
+[04/21 21:47:25.745920][error][1606820][UsbEnumeratorLibusb.cpp:420] Failed to query USB device serial number
+[04/21 21:47:25.821902][info][1606820][LinuxUsbPal.cpp:335] Create PollingDeviceWatcher!
+[04/21 21:47:25.821955][info][1606820][DeviceManager.cpp:25] Current found device(s): (0)
+[04/21 21:47:25.821969][info][1606820][DeviceManager.cpp:339] Enable net device enumeration: true
+[04/21 21:47:27.829017][info][1606820][DeviceManager.cpp:25] Current device(s) list: (0)
+[04/21 21:47:27.829877][warning][1606820][ObException.cpp:8] Device not found by serial number: CH28822007C

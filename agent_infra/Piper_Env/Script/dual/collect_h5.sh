@@ -2,12 +2,13 @@
 # Piper 双臂 H5 专家示教采集启动脚本
 
 CTRL_MODE="joint"
-TASK_NAME="piper_dual_h5_${CTRL_MODE}_task"
+TASK_NAME="piper_towel_h5_${CTRL_MODE}_task"
 CONFIG_PATH="agent_infra/Piper_Env/Config/dual_piper_config.yaml"
 MASTER_CAN_LEFT="can_ml"
 MASTER_CAN_RIGHT="can_mr"
 SLAVE_CAN_LEFT="can_sl"
 SLAVE_CAN_RIGHT="can_sr"
+MAX_STEP="${MAX_STEP:-800}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 
 while [[ $# -gt 0 ]]; do
@@ -30,9 +31,17 @@ while [[ $# -gt 0 ]]; do
       SLAVE_CAN_RIGHT="$3"
       shift 3
       ;;
+    --max-step|--max_step)
+      if [[ $# -lt 2 || "$2" == --* ]]; then
+        echo "[Launcher] --max-step 需要 1 个整数。"
+        exit 2
+      fi
+      MAX_STEP="$2"
+      shift 2
+      ;;
     *)
       echo "[Launcher] 未知参数: $1"
-      echo "用法: bash $0 [--master can_ml can_mr] [--slave can_sl can_sr]"
+      echo "用法: bash $0 [--master can_ml can_mr] [--slave can_sl can_sr] [--max-step N|-1]"
       exit 2
       ;;
   esac
@@ -48,4 +57,6 @@ echo "[Launcher] 启动双臂 H5 录制模式..."
   -cfg "$CONFIG_PATH" \
   -dual \
   --master "$MASTER_CAN_LEFT" "$MASTER_CAN_RIGHT" \
-  --slave "$SLAVE_CAN_LEFT" "$SLAVE_CAN_RIGHT"
+  --slave "$SLAVE_CAN_LEFT" "$SLAVE_CAN_RIGHT" \
+  --max-step "$MAX_STEP" \
+  #--no-preview

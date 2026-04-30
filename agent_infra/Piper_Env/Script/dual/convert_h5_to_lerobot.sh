@@ -3,8 +3,10 @@
 
 CTRL_MODE="joint"
 TASK_NAME="piper_dual_h5_${CTRL_MODE}_task"
-INPUT_H5="agent_infra/Piper_Env/Record/data/${TASK_NAME}/merged/dual_merged.h5"
-OUTPUT_DIR="agent_infra/Piper_Env/Record/data/${TASK_NAME}/lerobot_converted"
+#INPUT_H5="agent_infra/Piper_Env/Record/data/${TASK_NAME}/merged/dual_merged.h5"
+INPUT_H5="agent_infra/Piper_Env/Record/data/piper_towel_h5_joint_task/h5_raw"
+#OUTPUT_DIR="agent_infra/Piper_Env/Record/data/${TASK_NAME}/lerobot_converted"
+OUTPUT_DIR="data/merged/lerobot_converted"
 TASK_DESCRIPTION="dual piper ${CTRL_MODE} converted from h5"
 VCODEC="h264"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
