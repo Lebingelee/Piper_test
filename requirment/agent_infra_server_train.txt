@@ -1,0 +1,13 @@
+# agent_infra 在服务器训练/离线处理场景依赖
+-r agent_infra_base.txt
+scipy>=1.10
+omegaconf>=2.3
+einops>=0.7
+torch>=2.1
+torchvision>=0.16
+diffusers>=0.27
+lerobot
+
+# 如果训练环境使用 ManiSkill，可再额外安装：
+# mani-skill
+

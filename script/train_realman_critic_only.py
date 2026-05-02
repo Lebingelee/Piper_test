@@ -9,7 +9,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from agent_factory.agents.registry import get_default_config, make_agent
 from agent_factory.data.dataset import ExpertDataset
 from agent_factory.config.manager import ConfigManager
-from agent_factory.env_utils.env_factories import create_env
+from agent_factory.env.env_factories import create_env
 from agent_infra.Realman_Env.Camera.realsense_camera import get_connected_realsense_serials
 
 def get_debug_config(cfg):

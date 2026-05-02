@@ -2,6 +2,15 @@
 data/
 pyAgxArm/
 
+
+*.zip
+*.h5
+*.pth
+*.pt
+*.ckpt
+*.zarr
+*.mp4
+
 # Python caching
 __pycache__/
 *.py[cod]

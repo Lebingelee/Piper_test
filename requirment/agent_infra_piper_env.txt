@@ -1,0 +1,14 @@
+# agent_infra/Piper_Env 依赖
+-r agent_infra_base.txt
+scipy>=1.10
+lerobot
+
+# 可选相机依赖
+pyrealsense2
+
+# Orbbec Python SDK 建议在原生库准备好后手动安装，例如：
+# pip install -e ./pyorbbecsdk
+
+# Piper 机械臂控制 SDK 需要按实际环境单独安装：
+# pyAgxArm / AgxArm SDK
+

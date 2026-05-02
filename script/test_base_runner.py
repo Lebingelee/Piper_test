@@ -15,7 +15,7 @@ from agent_factory.runner import BaseRunner, HITLRunner
 def main():
     # 1. 加载配置
     #config_path = "server_result/dual_towel/itqc/config.yaml"
-    config_path = "server_result/dual_towel/diffusion_vanilla/base_config.yaml"
+    config_path = "run_results/config.yaml"
     if not os.path.exists(config_path):
         print(f"[Error] Config file not found at {config_path}")
         return
@@ -27,9 +27,9 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     cfg.device = device
     cfg.env.server_mode = False
-    cfg.env_kwargs.realman.hz = 30 # 降低测试频率
+    #cfg.env_kwargs.realman.hz = 30 # 降低测试频率
     #cfg.env.max_episode_steps = 250 # 用于测试，短一点的 trajectory
-    cfg.env.act_horizon = 48
+    cfg.env.act_horizon = 16
     cfg.runner.control_hz = 20
     cfg.runner.save_dir = "data/test_base_runner"
     os.makedirs(cfg.runner.save_dir, exist_ok=True)
@@ -54,7 +54,7 @@ def main():
     # 注意这里因为是测试 runner 我们可以暂时不用加载完美的预训练权重，直接用初始化或者部分权重的模型
     # 或者如果你需要权重，可以在这加上 agent.load(...)
     agent = make_agent(cfg.agent_type, cfg)
-    agent.load("server_result/dual_towel/diffusion_vanilla/step_25000.pth")
+    agent.load("run_results/step_80000.pth")
     #agent.load("server_result/dual_towel/itqc/step_40000.pth")
     agent.to(device)
     agent.eval()

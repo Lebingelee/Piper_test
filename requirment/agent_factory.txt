@@ -1,0 +1,18 @@
+# agent_factory 训练/推理核心依赖
+numpy>=1.24,<2.0
+gymnasium>=0.29
+h5py>=3.8
+tqdm>=4.66
+omegaconf>=2.3
+einops>=0.7
+torch>=2.1
+torchvision>=0.16
+diffusers>=0.27
+pynput>=1.7
+scipy>=1.10
+
+# 如果需要直接消费 LeRobot 数据，可再安装：
+# lerobot
+
+# 如果需要通过 create_env 使用 Piper 环境，建议再安装：
+# pip install -r requirment/agent_infra_piper_env.txt

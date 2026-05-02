@@ -1,0 +1,9 @@
+# agent_infra 通用环境基类与基础脚本依赖
+numpy>=1.24,<2.0
+gymnasium>=0.29
+PyYAML>=6.0
+h5py>=3.8
+opencv-python>=4.8
+tqdm>=4.66
+pynput>=1.7
+
