@@ -11,7 +11,7 @@ import argparse
 
 from agent_factory.agents.registry import get_default_config, make_agent
 from agent_factory.config.manager import ConfigManager
-from agent_factory.data.dataset import ExpertDataset
+from agent_factory.data.impl.diffusion_itqc.dataset import ExpertDataset
 from agent_factory.env.env_factories import create_env
 
 
@@ -34,7 +34,7 @@ def main():
         cfg.dataset.expert.demo_path = args.demo_path
 
     # Keep this script lightweight: only align config and build components.
-    env = create_env(cfg.env, cfg.env_kwargs)
+    env = create_env(cfg.env)
     env.reset()
 
     dataset = ExpertDataset(

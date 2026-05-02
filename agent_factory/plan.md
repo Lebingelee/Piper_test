@@ -32,7 +32,7 @@
 
 - [x] 环境工厂只显式支持 `mani_skill/realman/gymnasium`，未接入 `piper` 分支。  
   位置：`agent_factory/env/env_factories.py`。
-  状态：已修复（新增 `library == "piper"` 分支，支持 `SinglePiperEnv/DualPiperEnv + MetadataAdapterWrapper`，并兼容动态 `env_kwargs`）。
+  状态：已修复（新增 `library == "piper"` 分支，支持 `SinglePiperEnv/DualPiperEnv + MetadataAdapterWrapper`，环境特定参数统一由 `env.env_config_path` 指向的 YAML 提供）。
 
 - [x] `DiffusionActorMixin` 的 `REQUIRED_KEYS` 固定包含 `cond`，但 Vanilla Diffusion 实际并非必须，这会让数据集契约被“条件扩散”反向绑死。  
   位置：`agent_factory/agents/mixins/actor/diffusion.py`。
@@ -81,13 +81,13 @@
 
 ### 阶段 A：先打通“可创建 Piper 环境”
 
-- 在 `agent_factory/config/structure.py` 新增 `PiperEnvKwargs`，并挂到 `EnvKwargsConfig`（与 `realman/mani_skill` 并列）。
+- 在 `agent_factory/config/structure.py` 中保留单一 `EnvConfig`，通过 `env.env_config_path` 指向 Piper 环境 YAML。
 - 在 `create_env` 增加 `library == "piper"` 分支：
-  - 根据 `is_dual` 选择 `SinglePiperEnv` 或 `DualPiperEnv`；
+  - 根据环境 YAML 中的 `robots` 数量选择 `SinglePiperEnv` 或 `DualPiperEnv`；
   - 使用 `MetadataAdapterWrapper` 进行 obs/action 展平；
   - 再叠加 `UnifiedFrameStackWrapper` 与 `obs_horizon` 对齐。
 
-交付标准：`create_env(cfg.env, cfg.env_kwargs)` 可直接构造 Piper 环境并 `reset/step` 成功。
+交付标准：`create_env(cfg.env)` 可直接构造 Piper 环境并 `reset/step` 成功。
 
 ### 阶段 B：统一 Piper 数据到 agent_factory 训练格式
 
@@ -105,7 +105,7 @@
 - 增加示例配置（单臂/双臂）：
   - `env.library = "piper"`
   - `env.action_dim`、`env.proprio_dim`、`env.num_cameras`
-  - `env_kwargs.piper.config_path`、`camera_sns`、`is_dual`
+  - `env.env_config_path`
 - 给出至少两套模板：
   - `Diffusion_Vanilla` 离线 BC 模板；
   - `DSRL` 模板（含 `base_policy` 配置）。

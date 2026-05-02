@@ -122,16 +122,6 @@ class ConfigManager:
         return os.path.join(ConfigManager._project_root(), path)
 
     @staticmethod
-    def _deep_update(base: Dict[str, Any], update: Dict[str, Any]) -> Dict[str, Any]:
-        out = dict(base or {})
-        for k, v in (update or {}).items():
-            if isinstance(v, dict) and isinstance(out.get(k), dict):
-                out[k] = ConfigManager._deep_update(out[k], v)
-            else:
-                out[k] = v
-        return out
-
-    @staticmethod
     def _infer_piper_dims(env_cfg: Dict[str, Any], piper_cfg: Dict[str, Any]) -> Dict[str, int]:
         robots = piper_cfg.get("robots", {}) if isinstance(piper_cfg, dict) else {}
         common = piper_cfg.get("common", {}) if isinstance(piper_cfg, dict) else {}
@@ -159,40 +149,27 @@ class ConfigManager:
         """
         从 agent_infra 环境配置中解析默认参数，并与用户参数合并。
         约束：
-        - 不改变用户现有 YAML 格式（仍支持 env_kwargs.realman / env_kwargs.mani_skill）。
-        - 新环境可直接使用 env_kwargs.<library>，无需再改 structure.py。
+        - env.env_config_path 是环境特定 YAML 的唯一入口。
+        - 主配置的 env.* 字段优先；环境 YAML 只用于补默认值和推断维度。
+        - 不再兼容旧 env_kwargs / env.env_config 写法。
         """
         env_cfg = cfg_dict.setdefault("env", {})
-        env_kwargs = cfg_dict.setdefault("env_kwargs", {})
-        if not isinstance(env_cfg, dict) or not isinstance(env_kwargs, dict):
+        if not isinstance(env_cfg, dict):
             return cfg_dict
 
         library = str(env_cfg.get("library", "") or "").strip().lower()
         if not library:
             return cfg_dict
 
-        lib_kwargs = env_kwargs.get(library)
-        if lib_kwargs is None or not isinstance(lib_kwargs, dict):
-            lib_kwargs = {}
-            env_kwargs[library] = lib_kwargs
+        config_path = env_cfg.get("env_config_path")
 
-        # Generic env-specific YAML loading via config_path
-        config_path = lib_kwargs.get("config_path") or env_cfg.get("config_path")
-
-        # Piper default config fallback (keeps user YAML unchanged)
         if library == "piper" and not config_path:
-            is_dual = bool(lib_kwargs.get("is_dual", False))
-            default_rel = (
-                "agent_infra/Piper_Env/Config/dual_piper_config.yaml"
-                if is_dual else
-                "agent_infra/Piper_Env/Config/piper_config.yaml"
-            )
-            config_path = default_rel
+            config_path = "agent_infra/Piper_Env/Config/piper_config.yaml"
 
         loaded_cfg = {}
         if isinstance(config_path, str) and config_path.strip():
             abs_path = ConfigManager._resolve_config_path(config_path.strip())
-            lib_kwargs["config_path"] = abs_path
+            env_cfg["env_config_path"] = abs_path
             if os.path.exists(abs_path):
                 try:
                     with open(abs_path, "r", encoding="utf-8") as f:
@@ -202,20 +179,43 @@ class ConfigManager:
             else:
                 logger.warning(f"Env config path not found: {abs_path}")
 
+        if library == "realman" and isinstance(loaded_cfg, dict):
+            robot_cfg = loaded_cfg.get("robot", {})
+            common_cfg = loaded_cfg.get("common", {})
+            defaults = common_cfg if isinstance(common_cfg, dict) and common_cfg else robot_cfg
+            if isinstance(defaults, dict):
+                if (
+                    "default_control_mode" in defaults
+                    and not ConfigManager._dict_has_path(user_dict, ["env", "control_mode"])
+                ):
+                    env_cfg["control_mode"] = defaults["default_control_mode"]
+                if (
+                    "default_hz" in defaults
+                    and not ConfigManager._dict_has_path(user_dict, ["runner", "control_hz"])
+                ):
+                    cfg_dict.setdefault("runner", {})["control_hz"] = defaults["default_hz"]
+
         # 对特定库做自动推导（当前先支持 piper）
         if library == "piper" and isinstance(loaded_cfg, dict):
+            common_cfg = loaded_cfg.get("common", {})
+            if isinstance(common_cfg, dict):
+                if (
+                    "default_control_mode" in common_cfg
+                    and not ConfigManager._dict_has_path(user_dict, ["env", "control_mode"])
+                ):
+                    env_cfg["control_mode"] = common_cfg["default_control_mode"]
+                if (
+                    "default_hz" in common_cfg
+                    and not ConfigManager._dict_has_path(user_dict, ["runner", "control_hz"])
+                ):
+                    cfg_dict.setdefault("runner", {})["control_hz"] = common_cfg["default_hz"]
+
             inferred = ConfigManager._infer_piper_dims(env_cfg, loaded_cfg)
 
             # 用户显式设置优先；否则使用推导值覆盖全局默认
             for key, val in inferred.items():
                 if not ConfigManager._dict_has_path(user_dict, ["env", key]):
                     env_cfg[key] = val
-
-            # 将详细配置合并进 env_kwargs.piper.defaults，供后续环境构建使用
-            defaults_slot = lib_kwargs.get("defaults", {})
-            if not isinstance(defaults_slot, dict):
-                defaults_slot = {}
-            lib_kwargs["defaults"] = ConfigManager._deep_update(defaults_slot, loaded_cfg)
 
         return cfg_dict
 
@@ -235,28 +235,6 @@ class ConfigManager:
             }
             return out
 
-        def _normalize_camera_sns(cfg_dict: Dict[str, Any]):
-            env_kwargs = cfg_dict.get("env_kwargs", {})
-            if not isinstance(env_kwargs, dict):
-                return
-            realman = env_kwargs.get("realman", {})
-            if not isinstance(realman, dict) or "camera_sns" not in realman:
-                return
-            camera_sns = realman.get("camera_sns")
-            if camera_sns is None:
-                realman["camera_sns"] = []
-            elif isinstance(camera_sns, str):
-                token = camera_sns.strip()
-                if token == "" or token.lower() in {"none", "null"}:
-                    realman["camera_sns"] = []
-                else:
-                    realman["camera_sns"] = [token]
-            elif not isinstance(camera_sns, list):
-                try:
-                    realman["camera_sns"] = list(camera_sns)
-                except TypeError:
-                    realman["camera_sns"] = []
-
         # DSRL compatibility migration:
         # move deprecated actor.base_policy -> agent_sp.base_policy
         user_dict = OmegaConf.to_container(user_cfg, resolve=False)
@@ -275,7 +253,6 @@ class ConfigManager:
             if "base_policy" in agent_sp_cfg:
                 agent_sp_cfg["base_policy"] = _normalize_base_policy_cfg(agent_sp_cfg.get("base_policy"))
 
-            _normalize_camera_sns(user_dict)
             user_cfg = OmegaConf.create(user_dict)
         else:
             user_dict = {}

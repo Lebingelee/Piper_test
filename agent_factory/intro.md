@@ -94,7 +94,7 @@
 `get_default_config(agent_type)` -> `ConfigManager.merge_configs(...)`
 
 2. 构建环境  
-`create_env(cfg.env, cfg.env_kwargs)` -> wrappers 对齐 obs/action
+`create_env(cfg.env)` -> wrappers 对齐 obs/action
 
 3. 构建数据  
 `ExpertDataset(cfg, required_keys=agent.required_keys)`  

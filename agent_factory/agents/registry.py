@@ -17,25 +17,6 @@ def _sanitize_common_cfg_fields(cfg_obj: Any):
     if not isinstance(cfg_dict, dict):
         return OmegaConf.create(cfg_obj)
 
-    env_kwargs = cfg_dict.get("env_kwargs", {})
-    if isinstance(env_kwargs, dict):
-        realman = env_kwargs.get("realman", {})
-        if isinstance(realman, dict) and "camera_sns" in realman:
-            camera_sns = realman.get("camera_sns")
-            if camera_sns is None:
-                realman["camera_sns"] = []
-            elif isinstance(camera_sns, str):
-                token = camera_sns.strip()
-                if token == "" or token.lower() in {"none", "null"}:
-                    realman["camera_sns"] = []
-                else:
-                    realman["camera_sns"] = [token]
-            elif not isinstance(camera_sns, list):
-                try:
-                    realman["camera_sns"] = list(camera_sns)
-                except TypeError:
-                    realman["camera_sns"] = []
-
     return OmegaConf.create(cfg_dict)
 
 def register_agent(name: str):
@@ -93,6 +74,11 @@ def make_agent(agent_type: str, cfg: Any = None) -> 'BaseAgent':
         user_cfg = _sanitize_common_cfg_fields(cfg)
         # Merge: Default -> User (User overrides Default)
         final_cfg = OmegaConf.merge(default_cfg, user_cfg)
+        from agent_factory.config.manager import ConfigManager
+        final_dict = OmegaConf.to_container(final_cfg, resolve=False)
+        user_dict = OmegaConf.to_container(user_cfg, resolve=False)
+        if isinstance(final_dict, dict) and isinstance(user_dict, dict):
+            final_cfg = OmegaConf.create(ConfigManager._resolve_env_defaults(final_dict, user_dict))
     else:
         final_cfg = default_cfg
         

@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from typing import List, Optional, Any, Dict
 
 # ==================== 0. 基础组件配置 ====================
@@ -139,6 +139,7 @@ class DSRLCriticConfig(BaseCriticConfig):
 class EnvConfig:
     env_id: str = "StackCube-v1"
     library: str = "mani_skill"
+    env_config_path: str = ""
     action_dim: int = 7
     proprio_dim: int = 25
     server_mode : bool = False
@@ -171,6 +172,7 @@ class TrainConfig:
 class ExpertDatasetConfig:
     demo_path: str = "data/demos/expert_data.hdf5"
     num_traj: Optional[int] = None  # None 表示加载全部轨迹
+    format: str = "flat"  # flat | structured | auto
 
 @dataclass
 class ReplayBufferConfig:
@@ -195,49 +197,7 @@ class DatasetConfig:
     expert: ExpertDatasetConfig = field(default_factory=ExpertDatasetConfig)
     replay: ReplayBufferConfig = field(default_factory=ReplayBufferConfig)
 
-# ==================== 4. 环境特定参数 (Environment-Specific Kwargs) ====================
-
-@dataclass
-class RealmanEnvKwargs:
-    """Realman 物理环境的特定构造参数"""
-    robot_ip: str = "192.168.1.19"
-    camera_sns: List[str] = field(default_factory=list)
-    hz: int = 10
-    use_depth: bool = False
-    
-    # 🟢 新增：双臂与模块化适配参数
-    is_dual: bool = False           # 是否开启双臂模式
-    config_path: str = "env_config.yaml" # 配置文件路径
-    arm_names: List[str] = field(default_factory=lambda: ["arm"]) 
-
-@dataclass
-class ManiSkillEnvKwargs:
-    """ManiSkill 仿真环境的特定构造参数"""
-    reward_mode: str = 'sparse'
-    render_mode: str = 'rgb_array'
-
-@dataclass
-class EnvKwargsConfig:
-    """
-    环境特定参数的容器。
-    create_env 会根据 env.library 的值选择对应的子配置。
-    """
-    mani_skill: ManiSkillEnvKwargs = field(default_factory=ManiSkillEnvKwargs)
-    realman: RealmanEnvKwargs = field(default_factory=RealmanEnvKwargs)
-
-
-def _default_env_kwargs() -> Dict[str, Any]:
-    """
-    默认环境参数容器（动态字典版）。
-    保留现有 mani_skill / realman 默认值，同时允许未来新增任意 library 键，
-    避免每次新增环境都修改 dataclass 字段。
-    """
-    return {
-        "mani_skill": asdict(ManiSkillEnvKwargs()),
-        "realman": asdict(RealmanEnvKwargs()),
-    }
-
-# ==================== 5. 全局配置 (Top-Level) ====================
+# ==================== 4. 全局配置 (Top-Level) ====================
 
 @dataclass
 class GlobalConfig:
@@ -255,10 +215,6 @@ class GlobalConfig:
     reward_scale: float = 100
 
     env: EnvConfig = field(default_factory=EnvConfig)
-    # NOTE:
-    # 1) 继续兼容现有 YAML: env_kwargs.realman / env_kwargs.mani_skill
-    # 2) 允许未来新增 env_kwargs.<new_library> 而不修改 structure.py
-    env_kwargs: Dict[str, Any] = field(default_factory=_default_env_kwargs)
     train: TrainConfig = field(default_factory=TrainConfig)
     dataset: DatasetConfig = field(default_factory=DatasetConfig)
     runner: RunnerConfig = field(default_factory=RunnerConfig)

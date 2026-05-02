@@ -1,3 +1,5 @@
+import os
+import yaml
 import gymnasium as gym
 import logging
 from agent_factory.env.wrappers import UnifiedFrameStackWrapper
@@ -5,45 +7,38 @@ from agent_factory.env.wrappers import UnifiedFrameStackWrapper
 logger = logging.getLogger(__name__)
 
 
-def _to_plain_dict(obj):
-    if obj is None:
-        return {}
-    if isinstance(obj, dict):
-        return dict(obj)
-    try:
-        return dict(obj)
-    except Exception:
-        return {}
+def _project_root() -> str:
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 
-def _get_library_kwargs(env_kwargs, library: str):
-    """
-    兼容 DictConfig / dict / dataclass 风格的 env_kwargs 容器。
-    """
-    if env_kwargs is None:
-        return {}
-
-    # Dict / DictConfig-like
-    if hasattr(env_kwargs, "get"):
-        branch = env_kwargs.get(library, None)
-        if branch is not None:
-            return _to_plain_dict(branch)
-
-    # Attribute style fallback
-    branch = getattr(env_kwargs, library, None)
-    return _to_plain_dict(branch)
+def _resolve_env_config_path(path: str) -> str:
+    if not path:
+        return ""
+    if os.path.isabs(path):
+        return path
+    return os.path.join(_project_root(), path)
 
 
-def create_env(env_cfg, env_kwargs):
+def _load_env_config(env_cfg):
+    config_path = _resolve_env_config_path(getattr(env_cfg, "env_config_path", "") or "")
+    if not config_path:
+        return {}, ""
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"env_config_path not found: {config_path}")
+    with open(config_path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}, config_path
+
+
+def create_env(env_cfg):
     """
     Factory function to create environments based on configuration.
 
     Args:
         env_cfg (object): Common env config (e.g., env_id, control_mode).
-        env_kwargs (object): Library-specific arguments (OmegaConf object).
     """
     library = getattr(env_cfg, 'library', 'gymnasium')
     env_id = env_cfg.env_id
+    env_file_cfg, env_config_path = _load_env_config(env_cfg)
 
     logger.info(f"Creating Environment: {env_id} via {library}...")
 
@@ -51,41 +46,53 @@ def create_env(env_cfg, env_kwargs):
     if library == 'mani_skill':
         from agent_factory.env.wrappers import ManiSkillAdapterWrapper
 
-        specific_kwargs = _get_library_kwargs(env_kwargs, "mani_skill")
-
         env = gym.make(
             env_id,
             obs_mode=getattr(env_cfg, 'obs_mode', 'rgbd'),
             control_mode=getattr(env_cfg, 'control_mode', 'pd_ee_delta_pose'),
             max_episode_steps=getattr(env_cfg, 'max_episode_steps', 100),
-            **specific_kwargs
+            **env_file_cfg
         )
         env = ManiSkillAdapterWrapper(env)
 
     elif library == 'realman':
-        specific_kwargs = _get_library_kwargs(env_kwargs, "realman")
-        is_dual = bool(specific_kwargs.get('is_dual', False))
+        robot_cfg = env_file_cfg.get("robot", {}) if isinstance(env_file_cfg, dict) else {}
+        robots_cfg = env_file_cfg.get("robots", {}) if isinstance(env_file_cfg, dict) else {}
+        cameras_cfg = env_file_cfg.get("cameras", {}) if isinstance(env_file_cfg, dict) else {}
+        camera_nodes = cameras_cfg.get("nodes", []) if isinstance(cameras_cfg, dict) else []
+        camera_sns = [
+            node.get("serial_number")
+            for node in camera_nodes
+            if isinstance(node, dict) and node.get("serial_number")
+        ]
+        is_dual = bool(robots_cfg)
+        base_kwargs = {}
+        if camera_sns:
+            base_kwargs["camera_sns"] = camera_sns
         
         if getattr(env_cfg, 'server_mode', False):
             # 服务器模式：导入并使用 OfflineRealManEnv
             from agent_infra.Realman_Env.Env.offline_realman_env import OfflineRealManEnv
             env = OfflineRealManEnv(
                 control_mode=getattr(env_cfg, 'control_mode', 'delta_ee_pose'),
-                **specific_kwargs
+                **base_kwargs
             )
         else:
             if is_dual:
                 from agent_infra.Realman_Env.Env.dual_realman_env import DualRealManEnv
                 env = DualRealManEnv(
+                    config_path=env_config_path or "dual_env_config.yaml",
                     control_mode=getattr(env_cfg, 'control_mode', 'delta_ee_pose'),
-                    **specific_kwargs
+                    **base_kwargs
                 )
             else:
                 # 本地模式：使用真实的 RealManEnv
                 from agent_infra.Realman_Env.Env.realman_env import RealManEnv
                 env = RealManEnv(
+                    robot_ip=robot_cfg.get("ip") if isinstance(robot_cfg, dict) else None,
+                    hz=robot_cfg.get("default_hz") if isinstance(robot_cfg, dict) else None,
                     control_mode=getattr(env_cfg, 'control_mode', 'delta_ee_pose'),
-                    **specific_kwargs
+                    **base_kwargs
                 )
 
         from agent_factory.env.wrappers import MetadataAdapterWrapper
@@ -96,18 +103,16 @@ def create_env(env_cfg, env_kwargs):
         from agent_infra.Piper_Env.Env.dual_piper_env import DualPiperEnv
         from agent_factory.env.wrappers import MetadataAdapterWrapper
 
-        specific_kwargs = _get_library_kwargs(env_kwargs, "piper")
-        specific_kwargs = _to_plain_dict(specific_kwargs)
-
-        is_dual = bool(specific_kwargs.pop("is_dual", False))
-        # defaults 仅用于配置解析，不作为环境构造参数透传
-        specific_kwargs.pop("defaults", None)
+        robots = env_file_cfg.get("robots", {}) if isinstance(env_file_cfg, dict) else {}
+        common_cfg = env_file_cfg.get("common", {}) if isinstance(env_file_cfg, dict) else {}
+        is_dual = isinstance(robots, dict) and len(robots) == 2
+        hz = common_cfg.get("default_hz", getattr(env_cfg, 'hz', None))
 
         env_cls = DualPiperEnv if is_dual else SinglePiperEnv
         env = env_cls(
+            config_path=env_config_path or None,
             control_mode=getattr(env_cfg, 'control_mode', None),
-            hz=getattr(env_cfg, 'hz', None),
-            **specific_kwargs
+            hz=hz,
         )
         env = MetadataAdapterWrapper(env)
 

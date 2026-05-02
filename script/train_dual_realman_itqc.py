@@ -81,17 +81,11 @@ def main():
     else:
         cfg = get_dual_arm_config(cfg)
 
-    # 3. 创建虚拟环境以验证 Spaces 并获取 metadata
-    print("[Init] Creating Offline Environment...")
-    env = create_env(cfg.env, cfg.env_kwargs)
-    obs_space = env.observation_space
-    env.close()
 
     # 4. 加载数据集
     print(f"[Train] Loading expert dataset: {cfg.dataset.expert.demo_path}")
     expertdataset = ExpertDataset(
         cfg=cfg,
-        obs_space=obs_space,
         device="cpu"
     )
     

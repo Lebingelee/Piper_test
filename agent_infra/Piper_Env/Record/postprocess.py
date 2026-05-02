@@ -137,6 +137,62 @@ def _get_first_leaf_length(group: h5py.Group, ordered_keys: List[str]) -> int:
     raise KeyError("Unable to determine trajectory length from action group.")
 
 
+def _read_bool_signal(src_traj: h5py.Group, key: str, length: int) -> Optional[np.ndarray]:
+    if key not in src_traj:
+        return None
+
+    raw = np.asarray(src_traj[key][()], dtype=np.bool_)
+    if raw.shape == ():
+        values = np.zeros(length, dtype=np.bool_)
+        if length > 0:
+            values[-1] = bool(raw.item())
+        return values
+
+    values = raw.reshape(raw.shape[0], -1)
+    if values.shape[0] != length:
+        raise ValueError(
+            f"Signal '{key}' length mismatch: expected {length}, got {values.shape[0]}."
+        )
+    if values.shape[1] == 1:
+        return values[:, 0].astype(np.bool_)
+    return np.any(values, axis=1).astype(np.bool_)
+
+
+def _build_episode_signals(
+    src_traj: h5py.Group,
+    length: int,
+    success: bool,
+) -> Dict[str, np.ndarray]:
+    success_signal = _read_bool_signal(src_traj, "success", length)
+    if success_signal is None:
+        success_signal = np.zeros(length, dtype=np.bool_)
+        if length > 0:
+            success_signal[-1] = bool(success)
+
+    terminated_signal = _read_bool_signal(src_traj, "terminated", length)
+    if terminated_signal is None:
+        terminated_signal = _read_bool_signal(src_traj, "done", length)
+    if terminated_signal is None:
+        terminated_signal = np.zeros(length, dtype=np.bool_)
+    if length > 0:
+        terminated_signal[-1] = True
+
+    truncated_signal = _read_bool_signal(src_traj, "truncated", length)
+    if truncated_signal is None:
+        truncated_signal = np.zeros(length, dtype=np.bool_)
+
+    return {
+        "success": success_signal,
+        "terminated": terminated_signal,
+        "truncated": truncated_signal,
+    }
+
+
+def _write_episode_signals(dst_traj: h5py.Group, signals: Dict[str, np.ndarray]):
+    for key in ("success", "terminated", "truncated"):
+        dst_traj.create_dataset(key, data=np.asarray(signals[key], dtype=np.bool_))
+
+
 def _to_numpy(value: Any) -> np.ndarray:
     if hasattr(value, "numpy"):
         return value.numpy()
@@ -348,6 +404,13 @@ def merge_h5_trajectories(
                     )
 
                     success = bool(src_traj.attrs.get("success", h5_in.attrs.get("success", True)))
+                    action_len = _get_first_leaf_length(
+                        dst_traj["action"],
+                        list(current_env_meta["action"].keys()),
+                    )
+                    signals = _build_episode_signals(src_traj, action_len, success)
+                    _write_episode_signals(dst_traj, signals)
+
                     dst_traj.attrs["success"] = success
                     dst_traj.attrs["source_file"] = file_path
                     if traj_name is not None:
@@ -358,6 +421,8 @@ def merge_h5_trajectories(
                         "source_file": file_path,
                         "source_traj": traj_name,
                         "success": success,
+                        "terminated": bool(signals["terminated"][-1]) if action_len > 0 else False,
+                        "truncated": bool(signals["truncated"][-1]) if action_len > 0 else False,
                     })
                     merged_count += 1
 

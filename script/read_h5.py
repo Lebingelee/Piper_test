@@ -27,7 +27,7 @@ if __name__ == "__main__":
         description="Inspect shapes of datasets in an .h5 file whose keys contain given keywords."
     )
     parser.add_argument("-p","--file_path", type=str, 
-                        default='data/merged/dual_merged_flattened.h5',
+                        default="data/merged/dual_merged.h5",
                         help="Path to the .h5 file")
     parser.add_argument(
         "-k", "--keywords",
