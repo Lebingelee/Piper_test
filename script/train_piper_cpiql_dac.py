@@ -75,6 +75,13 @@ def build_cfg(args) -> Any:
     cfg.train.batch_size = args.batch_size
     cfg.train.num_workers = args.num_workers
     cfg.train.save_interval = args.save_interval
+    cfg.train.save_root = save_root
+    cfg.train.exp_name = args.exp_name
+    cfg.train.train_object = "critic_then_actor"
+    cfg.train.dataset_key = "offline"
+    cfg.train.critic_iters = args.critic_iters
+    cfg.train.actor_iters = args.actor_iters
+    cfg.train.critic_ckpt_path = ""
 
     cfg.actor.action_dim = stats["action_dim"]
     cfg.actor.encoder.proprio_dim = stats["proprio_dim"]
@@ -83,12 +90,6 @@ def build_cfg(args) -> Any:
     cfg.critic.encoder.proprio_dim = stats["proprio_dim"]
     cfg.critic.encoder.visual.in_channels = 3
     cfg.critic.encoder.visual.backbone_type = "resnet"
-
-    cfg.agent_sp.save_dir = save_root
-    cfg.agent_sp.exp_name = args.exp_name
-    cfg.agent_sp.actor_dataset_key = "offline"
-    cfg.agent_sp.critic_ckpt_path = ""
-    cfg.agent_sp.iters = args.actor_iters
 
     return cfg
 
@@ -155,10 +156,11 @@ def main():
 
     print("[Stage 2] Build actor agent from critic checkpoint")
     actor_cfg = copy.deepcopy(cfg)
-    actor_cfg.agent_sp.critic_ckpt_path = critic_ckpt
-    actor_cfg.agent_sp.save_dir = actor_dir
-    actor_cfg.agent_sp.exp_name = "actor"
-    actor_cfg.agent_sp.iters = args.actor_iters
+    actor_cfg.train.train_object = "actor"
+    actor_cfg.train.critic_ckpt_path = critic_ckpt
+    actor_cfg.train.save_root = actor_dir
+    actor_cfg.train.exp_name = "actor"
+    actor_cfg.train.actor_iters = args.actor_iters
     save_stage_cfg(actor_cfg, actor_dir)
 
     actor_agent = make_agent("Diffusion_CPIQL_DAC", actor_cfg)

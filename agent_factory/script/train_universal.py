@@ -242,7 +242,6 @@ def _save_model_config_snapshot(cfg: Any, save_dir: str, filename: str = "model_
     os.makedirs(save_dir, exist_ok=True)
     snapshot = OmegaConf.to_container(cfg, resolve=False)
     if isinstance(snapshot, dict):
-        snapshot.pop("agent_sp", None)
         snapshot.pop("device", None)
         dataset_cfg = snapshot.get("dataset")
         if isinstance(dataset_cfg, dict):
@@ -281,17 +280,7 @@ def train_universal(
 
     agent = make_agent(runtime_spec["agent_type"], cfg)
     dataset_bundle = build_training_bundle(cfg, required_keys=getattr(agent, "required_keys", None))
-
-    additional_args = {
-        "train_object": str(cfg.train.train_object),
-        "dataset_key": str(cfg.train.dataset_key),
-        "critic_iters": int(cfg.train.critic_iters),
-        "actor_iters": int(cfg.train.actor_iters),
-        "save_dir": run_root,
-        "exp_name": "",
-        "critic_ckpt_path": str(cfg.train.critic_ckpt_path),
-    }
-    agent.start_train(dataset_bundle, additional_args=additional_args)
+    agent.start_train(dataset_bundle)
 
     return {
         "cfg": cfg,

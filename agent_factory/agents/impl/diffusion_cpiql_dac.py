@@ -13,15 +13,14 @@ from agent_factory.agents.registry import register_agent
 
 @dataclass
 class CPIQLDACAgentSpecialConfig:
-    iters: int = 100000
-    critic_iters: int = 10000
-    actor_iters: int = 100000
-    save_dir: str = "run_results"
-    exp_name: str = ""
-    train_object: str = "critic_then_actor"
-    dataset_key: str = "expert_dataset"
-    actor_dataset_key: str = "offline"
-    critic_ckpt_path: str = ""
+    """
+    CPIQL-DAC private extension slot.
+
+    Universal training parameters live in cfg.train. Keep this structure
+    available so downstream users can subclass the agent and add private knobs
+    without changing the global config contract.
+    """
+    pass
 
 
 class MainMixin:
@@ -54,12 +53,10 @@ class DiffusionCPIQLDACAgent(MainMixin, CPIQLDACActorMixin, CPIQLCriticMixin, Ba
             for batch in loader:
                 yield batch
 
-    def _resolve_save_dir(self, save_dir: str, exp_name: str) -> str:
-        if not save_dir:
-            save_dir = self.cfg.agent_sp.save_dir
-        if exp_name is None:
-            exp_name = ""
-        return os.path.join(save_dir, exp_name) if exp_name else save_dir
+    def _resolve_save_dir(self) -> str:
+        save_root = str(getattr(self.cfg.train, "save_root", "run_results"))
+        exp_name = str(getattr(self.cfg.train, "exp_name", "") or "piper_dual_merged_cpiql_dac")
+        return os.path.join(save_root, exp_name)
 
     def _select_dataset_by_key(self, dataset, dataset_key: str):
         if not isinstance(dataset, dict):
@@ -114,27 +111,17 @@ class DiffusionCPIQLDACAgent(MainMixin, CPIQLDACActorMixin, CPIQLCriticMixin, Ba
             self.step += 1
 
     def _select_actor_dataset(self, dataset):
-        key = getattr(self.cfg.agent_sp, "actor_dataset_key", "expert_dataset")
+        key = str(getattr(self.cfg.train, "dataset_key", "expert_dataset"))
         return self._select_dataset_by_key(dataset, key)
 
     def start_train(self, dataset, additional_args: Optional[dict] = None):
-        additional_args = additional_args or {}
-        cfg_sp = self.cfg.agent_sp
-
-        train_object = str(additional_args.get("train_object", getattr(cfg_sp, "train_object", "actor")))
-        dataset_key = str(
-            additional_args.get(
-                "dataset_key",
-                getattr(cfg_sp, "dataset_key", getattr(cfg_sp, "actor_dataset_key", "expert_dataset")),
-            )
-        )
-        critic_iters = int(additional_args.get("critic_iters", getattr(cfg_sp, "critic_iters", cfg_sp.iters)))
-        actor_iters = int(additional_args.get("actor_iters", getattr(cfg_sp, "actor_iters", cfg_sp.iters)))
-        save_dir = self._resolve_save_dir(
-            str(additional_args.get("save_dir", cfg_sp.save_dir)),
-            additional_args.get("exp_name", cfg_sp.exp_name),
-        )
-        critic_ckpt_path = str(additional_args.get("critic_ckpt_path", getattr(cfg_sp, "critic_ckpt_path", "")))
+        train_cfg = self.cfg.train
+        train_object = str(getattr(train_cfg, "train_object", "actor"))
+        dataset_key = str(getattr(train_cfg, "dataset_key", "expert_dataset"))
+        critic_iters = int(getattr(train_cfg, "critic_iters", 0))
+        actor_iters = int(getattr(train_cfg, "actor_iters", 0))
+        save_dir = self._resolve_save_dir()
+        critic_ckpt_path = str(getattr(train_cfg, "critic_ckpt_path", ""))
 
         os.makedirs(save_dir, exist_ok=True)
         selected_dataset = self._select_dataset_by_key(dataset, dataset_key)
