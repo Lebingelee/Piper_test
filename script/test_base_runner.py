@@ -2,7 +2,6 @@ import os
 import sys
 import time
 import torch
-from omegaconf import DictConfig
 
 # 将根目录添加到 sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
