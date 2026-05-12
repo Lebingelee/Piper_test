@@ -11,7 +11,7 @@ env:
   proprio_dim: 38
   server_mode: false
   obs_horizon: 2
-  pred_horizon: 16
+  pred_horizon: 48
   act_horizon: 8
   num_cameras: 3
   obs_mode: rgb
@@ -20,22 +20,22 @@ env:
   control_mode: joint
   reward_mode: sparse
   render_mode: rgb_array
-  max_episode_steps: 500
+  max_episode_steps: 700
   gamma: 0.99
   penalty: -150.0
   reward_scale: 100
   reward_shape: false
 train:
-  device: cpu
-  batch_size: 2
-  num_workers: 0
+  device: cuda:0
+  batch_size: 24
+  num_workers: 20
   n_epochs: 1000
   save_interval: 15000
   train_object: critic_then_actor
   dataset_mode: expert_dataset
   dataset_key: expert_dataset
-  critic_iters: 1
-  actor_iters: 1
+  critic_iters: 8000
+  actor_iters: 60000
   critic_ckpt_path: ''
   save_root: run_results
   exp_name: piper_dual_merged_cpiql_dac
@@ -44,7 +44,7 @@ dataset:
   include_rgb: true
   include_depth: false
   expert:
-    demo_path: data/merged/dual_merged.h5
+    demo_path: data/ssh/dual_merged.h5
     num_traj: null
     format: auto
   replaybuffer:
@@ -64,7 +64,7 @@ actor:
   type: cpiql_dac_diffusion
   obs_horizon: 2
   action_dim: 14
-  pred_horizon: 16
+  pred_horizon: 48
   require_env_action_dim_match: true
   norm:
     type: min_max
@@ -167,3 +167,4 @@ critic:
   grad_clip_norm: 0.0
   target_update_interval: 1
   log_interval: 100
+agent_sp: {}

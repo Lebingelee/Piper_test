@@ -125,6 +125,7 @@ class DiffusionCPIQLDACAgent(MainMixin, CPIQLDACActorMixin, CPIQLCriticMixin, Ba
 
         os.makedirs(save_dir, exist_ok=True)
         selected_dataset = self._select_dataset_by_key(dataset, dataset_key)
+        self._fit_action_normalizer_from_dataset(selected_dataset)
 
         def _make_loader(ds):
             return DataLoader(
@@ -152,7 +153,6 @@ class DiffusionCPIQLDACAgent(MainMixin, CPIQLDACActorMixin, CPIQLCriticMixin, Ba
             self.load(critic_ckpt_path)
 
         actor_dataset = selected_dataset
-        self._fit_action_normalizer_from_dataset(actor_dataset)
         actor_loader = _make_loader(actor_dataset)
         print(f">>> Start CPIQL-DAC Actor Training ({actor_iters} steps) on dataset={dataset_key}")
         self.train_actor_loop(actor_loader, actor_iters, save_dir=save_dir)

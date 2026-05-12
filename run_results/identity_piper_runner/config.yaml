@@ -1,0 +1,74 @@
+agent_type: Identity
+agent_control_mode: absolute_joint
+device: cuda
+seed: 42
+soft_update_tau: 0.005
+reward_scale: 100.0
+env:
+  env_id: Piper-Dual-Merged
+  library: piper
+  env_config_path: /home/lebinge/Desktop/Piper_test/agent_infra/Piper_Env/Config/dual_piper_config.yaml
+  action_dim: 14
+  proprio_dim: 38
+  server_mode: false
+  obs_horizon: 2
+  pred_horizon: 64
+  act_horizon: 64
+  num_cameras: 3
+  obs_mode: rgb
+  env_control_mode: absolute_joint
+  controller_backend: joint
+  control_mode: joint
+  reward_mode: sparse
+  render_mode: rgb_array
+  max_episode_steps: 600
+  gamma: 0.99
+  penalty: -150.0
+  reward_scale: 100
+  reward_shape: false
+train:
+  device: cuda
+  batch_size: 32
+  num_workers: 0
+  n_epochs: 1000
+  save_interval: 5000
+  train_object: critic_then_actor
+  dataset_mode: expert_dataset
+  dataset_key: expert_dataset
+  critic_iters: 200
+  actor_iters: 200
+  critic_ckpt_path: ''
+  save_root: run_results
+  exp_name: ''
+dataset:
+  dataset_type: cpiql
+  include_rgb: true
+  include_depth: false
+  expert:
+    demo_path: data/demos/expert_data.hdf5
+    num_traj: null
+    format: flat
+  replaybuffer:
+    max_traj_num: 100
+    folder_path: data/identity_piper_hitl_runner
+    replaybuffer_path: ''
+  replay:
+    max_traj_num: 100
+    folder_path: ''
+    replaybuffer_path: ''
+runner:
+  control_hz: 20
+  buffer_capacity: 20
+  redundancy_margin: 20
+  save_dir: data/identity_piper_base_runner
+  hitl_enabled: false
+  hitl_override_key: o
+  hitl_source: keyboard
+  hitl_finalize_intervention: true
+actor:
+  action_dim: 14
+  pred_horizon: 64
+  obs_horizon: 2
+  require_env_action_dim_match: true
+critic: null
+agent_sp: {}

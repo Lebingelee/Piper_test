@@ -267,6 +267,7 @@ robomimic task env、仿真环境或后续第三方任务环境的数据 **MUST*
 - `observation_space`
 - `meta_keys`
 - `get_safe_action`
+- `switch_passive(mode: str)` for real hardware envs
 
 HITL 环境 **MUST** 在 `info` 中提供执行动作和接管信号：
 
@@ -286,6 +287,11 @@ runner **MUST NOT** 调用机器人私有 SDK、私有 CAN/IP 逻辑或相机私
 硬件安全规则 **SHOULD** 由具体硬件 env 实现，但以下原则为全局要求：
 
 - 所有真实硬件 env **MUST** 提供 `get_safe_action`。
+- 所有真实硬件 env **MUST** 提供动作下发安全锁 `switch_passive(mode: str)`。
+- `switch_passive("true")` **MUST** 表示允许 `step()` 中的动作真正下发到硬件。
+- `switch_passive("false")` 或默认未开启状态 **MUST** 表示 `step()` 仍可执行频率控制、观测读取和 `info` 构建，但不得调用底层硬件动作下发接口。
+- 动作下发安全锁 **MUST** 位于环境内部最终硬件 dispatch 边界，例如 `_apply_action()`，并覆盖 policy、safe action、teleop/HITL 覆盖后的动作等所有 `step()` 动作来源。
+- 动作下发安全锁 **MUST NOT** 被 runner、agent、dataset 或算法层绕过；上层只能通过 `env.unwrapped.switch_passive(...)` 显式开启或关闭。
 - replay 脚本 **MUST** 支持从首帧状态 reset 或显式声明不 reset。
 - 真实硬件动作下发 **SHOULD** 有控制频率限制。
 - 真实硬件 reset **SHOULD** 支持配置化初始位姿。
@@ -320,4 +326,3 @@ runner **MUST NOT** 调用机器人私有 SDK、私有 CAN/IP 逻辑或相机私
 - 是否说明 LeRobot 数据流是否支持。
 - 是否说明与 runner 的交互方式。
 - 是否未引入算法层依赖。
-

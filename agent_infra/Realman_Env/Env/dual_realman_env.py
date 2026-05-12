@@ -193,6 +193,9 @@ class DualRealManEnv(RealmanBaseEnv):
             super()._apply_action(action)
 
     def switch_passive(self, mode: str):
+        """切换被动控制模式。
+        "true" 开启被动控制（环境直接执行输入的动作），"false" 则关闭（环境不执行动作，保持静止）。
+        """
         self.passive = (mode.lower() == 'true')
 
     def close(self):

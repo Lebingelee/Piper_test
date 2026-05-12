@@ -19,7 +19,7 @@ from agent_factory.script.train_universal import train_universal
 
 
 #"run_results/piper_dual_merged_cpiql_dac/config.yaml"
-CONFIG_PATH = "run_results/piper_dual_merged_cpiql_dac/model_config.yaml"
+CONFIG_PATH = "run_results/towel_cpiql_dac/model_config.yaml"
 DRY_RUN = False
 OVERRIDES: Dict[str, Any] = {
     "device": None,

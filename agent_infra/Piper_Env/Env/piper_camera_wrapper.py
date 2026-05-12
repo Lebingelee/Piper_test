@@ -112,6 +112,10 @@ class PiperCameraWrapper(AbstractCameraWrapper):
 
         # --- 动态更新底层 MetaKeys ---
         self._update_unwrapped_meta()
+        if hasattr(self.env.unwrapped, "_setup_spaces"):
+            self.env.unwrapped._setup_spaces()
+        self.action_space = self.env.action_space
+        self.observation_space = self.env.observation_space
 
     def _update_unwrapped_meta(self):
         """将视觉维度注入到底层环境的 meta_keys 中"""

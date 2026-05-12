@@ -1,5 +1,6 @@
 import numpy as np
 from typing import Dict, Any, List, Optional, Literal
+from gymnasium import spaces
 
 import os
 import time
@@ -16,6 +17,25 @@ from agent_infra.Piper_Env.Env.utils.piper_arm import PiperArm
 
 
 PIPER_CONTROL_MODES = ("joint", "pose", "delta_pose", "relative_pose_chunk")
+PIPER_JOINT_LIMITS_DEG = np.array(
+    [
+        [-150.0, 150.0],
+        [0.0, 170.0],
+        [-160.0, 0.0],
+        [-90.0, 90.0],
+        [-70.0, 70.0],
+        [-150.0, 150.0],
+    ],
+    dtype=np.float32,
+)
+PIPER_JOINT_LOW = np.deg2rad(PIPER_JOINT_LIMITS_DEG[:, 0]).astype(np.float32)
+PIPER_JOINT_HIGH = np.deg2rad(PIPER_JOINT_LIMITS_DEG[:, 1]).astype(np.float32)
+PIPER_POSE_LOW = np.array([-1.0, -1.0, 0.0, -1.0, -1.0, -1.0], dtype=np.float32)
+PIPER_POSE_HIGH = np.ones(6, dtype=np.float32)
+PIPER_DELTA_POSE_LOW = -np.ones(6, dtype=np.float32)
+PIPER_DELTA_POSE_HIGH = np.ones(6, dtype=np.float32)
+PIPER_GRIPPER_LOW = np.array([0.0], dtype=np.float32)
+PIPER_GRIPPER_HIGH = np.array([0.2], dtype=np.float32)
 
 
 class PiperBaseEnv(BaseRobotEnv):
@@ -49,8 +69,10 @@ class PiperBaseEnv(BaseRobotEnv):
         self.default_init_gripper_pos = kwargs.get("init_gripper_pos", 0.05)
         self.default_init_wait_time = kwargs.get("init_wait_time", 0.50)
         self.parallel_reset = bool(kwargs.get("parallel_reset", False))
+        self.passive = False
 
         self._setup_meta_keys()
+        self._setup_spaces()
 
         self.arms: Dict[str, PiperArm] = {}
         self.arm: Optional[PiperArm] = None
@@ -107,6 +129,76 @@ class PiperBaseEnv(BaseRobotEnv):
         if len(arm_entries) == 1:
             self.control_meta["eef_pose_key"] = arm_entries[0]["state_pose_key"]
 
+    def _arm_action_bounds(self, shape) -> tuple[np.ndarray, np.ndarray]:
+        if self.control_mode == "joint":
+            low = PIPER_JOINT_LOW
+            high = PIPER_JOINT_HIGH
+        elif self.control_mode == "pose":
+            low = PIPER_POSE_LOW
+            high = PIPER_POSE_HIGH
+        elif self.control_mode == "delta_pose":
+            low = PIPER_DELTA_POSE_LOW
+            high = PIPER_DELTA_POSE_HIGH
+        else:
+            low = np.tile(PIPER_DELTA_POSE_LOW, self.relative_pose_chunk_size)
+            high = np.tile(PIPER_DELTA_POSE_HIGH, self.relative_pose_chunk_size)
+        return low.reshape(shape).astype(np.float32), high.reshape(shape).astype(np.float32)
+
+    def _setup_spaces(self):
+        action_spaces = {}
+        for key, shape in self.meta_keys["action"].items():
+            if "gripper" in key:
+                action_spaces[key] = spaces.Box(
+                    low=PIPER_GRIPPER_LOW.reshape(shape),
+                    high=PIPER_GRIPPER_HIGH.reshape(shape),
+                    shape=shape,
+                    dtype=np.float32,
+                )
+            else:
+                low, high = self._arm_action_bounds(shape)
+                action_spaces[key] = spaces.Box(
+                    low=low,
+                    high=high,
+                    shape=shape,
+                    dtype=np.float32,
+                )
+        self.action_space = spaces.Dict(action_spaces)
+
+        obs_spaces = {}
+        for modality, entries in self.meta_keys["obs"].items():
+            modality_spaces = {}
+            for key, shape in entries.items():
+                if modality == "rgb":
+                    modality_spaces[key] = spaces.Box(
+                        low=0,
+                        high=255,
+                        shape=shape,
+                        dtype=np.uint8,
+                    )
+                elif modality == "depth":
+                    modality_spaces[key] = spaces.Box(
+                        low=0,
+                        high=65535,
+                        shape=shape,
+                        dtype=np.uint16,
+                    )
+                elif modality == "under_control":
+                    modality_spaces[key] = spaces.Box(
+                        low=0,
+                        high=1,
+                        shape=shape,
+                        dtype=np.int8,
+                    )
+                else:
+                    modality_spaces[key] = spaces.Box(
+                        low=-np.inf,
+                        high=np.inf,
+                        shape=shape,
+                        dtype=np.float32,
+                    )
+            obs_spaces[modality] = spaces.Dict(modality_spaces)
+        self.observation_space = spaces.Dict(obs_spaces)
+
     def _setup_hardware(self):
         for name in self.arm_names:
             spec_cfg = self.robot_configs.get(name, {})
@@ -143,11 +235,20 @@ class PiperBaseEnv(BaseRobotEnv):
         return {"state": combined_state}
 
     def _apply_action(self, action: Dict[str, np.ndarray]):
+        if not self.passive:
+            return
         for name, arm in self.arms.items():
             prefix = self._prefix(name)
             arm_act = action[f"{prefix}arm"]
             grip_act = action[f"{prefix}gripper"][0]
             arm.apply_action(arm_act, grip_act, mode=self.control_mode)
+
+    def switch_passive(self, mode: str):
+        """切换被动控制模式。
+        "true" 开启被动控制（环境直接执行输入的动作），"false" 则关闭（环境不执行动作，保持静止）。
+        """
+        self.passive = (str(mode).lower() == "true")
+        print(f"[PiperBase] Action dispatch: {'ENABLED' if self.passive else 'DISABLED'}")
 
     def _begin_master_sync_reset(self):
         """Hook: 子类可在主臂同步复位前暂停后台线程。"""
@@ -246,6 +347,7 @@ class PiperBaseEnv(BaseRobotEnv):
         if state is None:
             obs = self._get_obs()
             state = obs["state"]
+        #print(state)
         safe_action = {}
         for name in self.arm_names:
             prefix = self._prefix(name)
@@ -259,6 +361,7 @@ class PiperBaseEnv(BaseRobotEnv):
                 arm_action = np.zeros(self.relative_pose_chunk_size * 6, dtype=np.float32)
             safe_action[f"{prefix}arm"] = arm_action.copy()
             safe_action[f"{prefix}gripper"] = state[f"{prefix}gripper_pos"].copy()
+        #print(safe_action)
         return safe_action
 
     def close(self):
@@ -315,6 +418,7 @@ class PiperEnv(PiperBaseEnv):
             **kwargs,
         )
         self._setup_teleop_meta_keys()
+        self._setup_spaces()
 
         self.tele_enabled = False
         self._lock = threading.Lock()
@@ -324,6 +428,10 @@ class PiperEnv(PiperBaseEnv):
         self._master_read_pause_lock = threading.Lock()
         self._teleop_before_reset = False
         self._debounce_threshold = common_cfg.get("teleop_debounce_sec", 0.5)
+        self._teleop_toggle_debounce_sec = float(
+            common_cfg.get("teleop_toggle_debounce_sec", self._debounce_threshold)
+        )
+        self._last_teleop_toggle_time = 0.0
         self._master_gripper_jump_threshold = float(
             common_cfg.get("master_gripper_jump_threshold_m", 0.04)
         )
@@ -344,11 +452,10 @@ class PiperEnv(PiperBaseEnv):
         self._sync_joint_threshold = float(common_cfg.get("sync_joint_threshold_rad", 0.12))
         self._sync_pose_threshold = float(common_cfg.get("sync_pose_threshold", 0.03))
         self._master_follow_warned = set()
-        if self.master_follow:
-            print(
-                "[PiperEnv] Warning: master_follow 主臂主动跟随路径已临时禁用（安全回退）。"
-                "当前将保持 master 分支稳定语义：仅 follower 跟随 leader。"
-            )
+        print(
+            f"[PiperEnv] Master-follow during policy control: "
+            f"{'ON' if self.master_follow else 'OFF'}"
+        )
         self._master_cache = {
             name: {
                 "joint": np.zeros(7, dtype=np.float32),
@@ -399,6 +506,40 @@ class PiperEnv(PiperBaseEnv):
             name: (1,) for name in self.arm_names
         }
 
+    def set_master_follow(self, enabled: bool):
+        """
+        Runtime switch for policy-phase master-follow.
+
+        When enabled, policy-controlled steps mirror follower state back to the
+        master arm. Mode switches are only sent at state boundaries.
+        """
+        self.master_follow = bool(enabled)
+        if self.master_follow and self.passive and not self.tele_enabled:
+            for arm in self.arms.values():
+                arm.begin_master_follow()
+        elif not self.master_follow:
+            for arm in self.arms.values():
+                arm.end_master_follow(force=True)
+        print(
+            f"[PiperEnv] Master-follow during policy control: "
+            f"{'ON' if self.master_follow else 'OFF'}"
+        )
+
+    def switch_master_follow(self, mode: str):
+        self.set_master_follow(str(mode).lower() == "true")
+
+    def switch_passive(self, mode: str):
+        super().switch_passive(mode)
+        if self.passive and self.master_follow and not self.tele_enabled:
+            for arm in self.arms.values():
+                arm.begin_master_follow()
+        elif not self.passive:
+            for arm in self.arms.values():
+                arm.end_master_follow(force=True)
+
+    def is_teleop_enabled(self) -> bool:
+        return bool(self.tele_enabled)
+
     def _initialize_master_gripper_cache_from_followers(self):
         for name, arm in self.arms.items():
             try:
@@ -434,7 +575,23 @@ class PiperEnv(PiperBaseEnv):
     def _on_press(self, key):
         try:
             if key.char in ("t", "T"):
+                now = time.time()
+                if now - self._last_teleop_toggle_time < self._teleop_toggle_debounce_sec:
+                    return
+                self._last_teleop_toggle_time = now
                 self.tele_enabled = not self.tele_enabled
+                if self.tele_enabled:
+                    for arm in self.arms.values():
+                        arm.end_master_follow(force=True)
+                    with self._lock:
+                        for cache in self._master_cache.values():
+                            cache["is_ok"] = False
+                            cache["last_ok_time"] = 0.0
+                            cache["has_leader_joint"] = False
+                            cache["last_leader_joint_time"] = 0.0
+                elif self.passive and self.master_follow:
+                    for arm in self.arms.values():
+                        arm.begin_master_follow()
                 print(f"\n[PiperEnv] Teleoperation Toggle: {'ON' if self.tele_enabled else 'OFF'}")
         except AttributeError:
             pass
@@ -601,10 +758,41 @@ class PiperEnv(PiperBaseEnv):
             return bool(err <= self._sync_pose_threshold)
         return True
 
-    def _mirror_follower_to_master(self, obs: Dict[str, Any], intervened: Dict[str, bool]):
-        # 安全回退：暂时禁用主臂主动跟随，避免主臂锁住/异常位姿。
-        for arm in self.arms.values():
-            arm.end_master_follow()
+    def _mirror_follower_to_master(
+        self,
+        obs: Dict[str, Any],
+        intervened: Dict[str, bool],
+        executed_action: Optional[Dict[str, np.ndarray]] = None,
+    ):
+        if not self.passive or not self.master_follow or self.tele_enabled:
+            return
+
+        state = obs.get("state", {}) if isinstance(obs, dict) else {}
+        for name, arm in self.arms.items():
+            if intervened.get(name, False):
+                continue
+
+            prefix = self._prefix(name)
+            try:
+                follower_joint_pos = state[f"{prefix}joint_pos"]
+                follower_gripper_pos = float(
+                    np.asarray(state[f"{prefix}gripper_pos"]).reshape(-1)[0]
+                )
+                if self.control_mode == "joint" and executed_action is not None:
+                    follower_joint_pos = executed_action[f"{prefix}arm"]
+                    follower_gripper_pos = float(
+                        np.asarray(executed_action[f"{prefix}gripper"]).reshape(-1)[0]
+                    )
+                arm.mirror_follower_state_to_master(
+                    follower_joint_pos=follower_joint_pos,
+                    follower_ee_pose=state[f"{prefix}ee_pose"],
+                    follower_gripper_pos=follower_gripper_pos,
+                    control_mode=self.control_mode,
+                )
+            except Exception as exc:
+                if name not in self._master_follow_warned:
+                    print(f"[PiperEnv] 主臂跟随从臂失败 [{name}]: {exc}")
+                    self._master_follow_warned.add(name)
 
     def step(self, action: Dict[str, np.ndarray]):
         policy_action = {k: v.copy() for k, v in action.items()}
@@ -612,18 +800,26 @@ class PiperEnv(PiperBaseEnv):
         intervened = {}
         action_source = {}
         syncing = {}
+        teleop_requested = bool(self.tele_enabled)
+        teleop_hold_action = self.get_safe_action() if teleop_requested else None
 
         for name in self.arm_names:
             prefix = self._prefix(name)
-            is_intervened = self._check_under_control(name)
-            intervened[name] = is_intervened
-            if not is_intervened:
+            teleop_ready = self._check_under_control(name)
+            intervened[name] = teleop_requested
+
+            if teleop_requested and not teleop_ready:
+                executed_action[f"{prefix}arm"] = teleop_hold_action[f"{prefix}arm"].copy()
+                executed_action[f"{prefix}gripper"] = teleop_hold_action[f"{prefix}gripper"].copy()
+                action_source[name] = "teleop_wait"
+                syncing[name] = False
+                continue
+
+            if not teleop_ready:
                 action_source[name] = "policy"
                 syncing[name] = False
                 continue
 
-            # 一旦检测到人工拖动，立即解除主臂跟随从臂关系，避免信息错位。
-            self.arms[name].end_master_follow()
             with self._lock:
                 cache = self._master_cache[name]
                 if self.control_mode == "joint":
@@ -659,18 +855,24 @@ class PiperEnv(PiperBaseEnv):
             executed_action[f"{prefix}gripper"] = np.array([expert_gripper], dtype=np.float32)
 
         obs, reward, terminated, truncated, info = super().step(executed_action)
-        self._mirror_follower_to_master(obs, intervened)
+        self._mirror_follower_to_master(obs, intervened, executed_action=executed_action)
         info["actual_action"] = executed_action
         info["policy_action"] = policy_action
         info["intervened"] = intervened if len(self.arm_names) > 1 else intervened[self.arm_names[0]]
         info["intervened_map"] = intervened
+        info["teleop_enabled"] = teleop_requested
         info["action_source"] = action_source if len(self.arm_names) > 1 else action_source[self.arm_names[0]]
         info["action_source_map"] = action_source
         info["syncing"] = syncing if len(self.arm_names) > 1 else syncing[self.arm_names[0]]
         info["syncing_map"] = syncing
         info["master_follow_enabled"] = self.master_follow
         action_type_map = {
-            name: (0 if action_source[name] == "policy" else 1 if action_source[name] == "expert" else 2)
+            name: (
+                0 if action_source[name] == "policy"
+                else 1 if action_source[name] == "expert"
+                else 2 if action_source[name] == "sync"
+                else 3
+            )
             for name in self.arm_names
         }
         info["action_type"] = action_type_map if len(self.arm_names) > 1 else action_type_map[self.arm_names[0]]

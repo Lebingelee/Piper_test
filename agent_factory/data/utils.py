@@ -92,10 +92,10 @@ def compute_n_step_signals(rewards, start_idx, n, gamma):
 def preprocess_obs(obs_dict: Dict[str, Any], device: torch.device = torch.device('cpu')) -> Dict[str, torch.Tensor]:
     """
     统一的观测预处理逻辑：
-    1. 图像 (rgb/depth) 归一化。
+    1. 图像 (rgb/depth) 分别归一化。
     2. 类型转换 (float32)。
     3. 保留其他字段 (state, cond 等) 并搬运到指定设备。
-    4. 自动处理 RGB-D 拼接逻辑。
+    4. depth 保持独立模态，不隐式拼接进 rgb。
     """
     out = {}
     
@@ -124,19 +124,7 @@ def preprocess_obs(obs_dict: Dict[str, Any], device: torch.device = torch.device
         # 如果已经是 float，假设已经归一化过
         if not isinstance(obs_dict['depth'], torch.Tensor) or obs_dict['depth'].dtype != torch.float32:
              depth = depth / 1024.0
-            
-        if 'rgb' in out:
-            # 动态检测通道维 (C,H,W)->0; (T,C,H,W)->1; (B,T,C,H,W)->2
-            ndim = out['rgb'].ndim
-            c_dim = ndim - 3 # 通用逻辑：倒数第三维是 Channel
-            
-            # 只有在 RGB 是 3通道倍数时尝试拼接 RGB-D，否则独立保留
-            if out['rgb'].shape[c_dim] % 3 == 0:
-                out['rgb'] = torch.cat([out['rgb'], depth], dim=c_dim)
-            else:
-                out['depth'] = depth
-        else:
-            out['rgb'] = depth
+        out['depth'] = depth
     
     # 3. 处理其他所有字段 (state, cond, action 等)
     for k, v in obs_dict.items():

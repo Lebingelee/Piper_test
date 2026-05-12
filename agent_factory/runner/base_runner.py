@@ -61,6 +61,8 @@ class BaseRunner:
             'obs': [], 
             'action': [],
             'action_type': [],
+            'success': [],
+            'intervention': [],
             'rewards': [],
             'terminated': [],
             'truncated': []
@@ -124,6 +126,8 @@ class BaseRunner:
 
     def _transform_policy_chunk_to_env_chunk(self, action_chunk: np.ndarray) -> np.ndarray:
         chunk = np.asarray(action_chunk, dtype=np.float32)
+        if bool(getattr(self.agent, "uses_env_safe_action", False)):
+            return chunk
         if self.agent_control_mode == self.env_control_mode:
             return chunk
         meta = self._build_forward_transform_meta()
@@ -146,6 +150,85 @@ class BaseRunner:
             "controller_backend": getattr(base_env, "controller_backend", ""),
             "control": getattr(base_env, "control_meta", {}),
         }
+
+    def _align_action_dim(self, action: np.ndarray) -> np.ndarray:
+        """
+        Return a flat env-action vector with the wrapped env action dimension.
+        """
+        action = np.asarray(action, dtype=np.float32).reshape(-1)
+        try:
+            target_dim = int(self.env.action_space.shape[0])
+        except Exception:
+            return action
+        if action.shape[0] == target_dim:
+            return action
+        if action.shape[0] < target_dim:
+            pad = np.zeros((target_dim - action.shape[0],), dtype=np.float32)
+            return np.concatenate([action, pad], axis=0)
+        return action[:target_dim]
+
+    def _flatten_env_action(self, action_from_info: Any, fallback_action: np.ndarray) -> np.ndarray:
+        """
+        Flatten an env-native action, preferring info["actual_action"] when the
+        env exposes expert/safety arbitration. The saved H5 "action" dataset is
+        always this executed env-native vector.
+        """
+        if action_from_info is None:
+            return self._align_action_dim(fallback_action)
+
+        try:
+            if isinstance(action_from_info, dict):
+                if (
+                    hasattr(self.env, "has_wrapper_attr")
+                    and self.env.has_wrapper_attr("flatten_action")
+                ):
+                    flatten_fn = self.env.get_wrapper_attr("flatten_action")
+                    return self._align_action_dim(
+                        np.asarray(flatten_fn(action_from_info), dtype=np.float32)
+                    )
+                return self._align_action_dim(fallback_action)
+            return self._align_action_dim(np.asarray(action_from_info, dtype=np.float32))
+        except Exception:
+            return self._align_action_dim(fallback_action)
+
+    @staticmethod
+    def _any_true(value: Any) -> bool:
+        if isinstance(value, dict):
+            return any(BaseRunner._any_true(v) for v in value.values())
+        arr = np.asarray(value).reshape(-1)
+        return bool(arr.size > 0 and np.any(arr))
+
+    def _extract_env_intervened(self, info: Dict[str, Any]) -> bool:
+        if "intervened_map" in info:
+            return self._any_true(info["intervened_map"])
+        if "intervened" in info:
+            return self._any_true(info["intervened"])
+        if "intervention" in info:
+            return self._any_true(info["intervention"])
+        return False
+
+    def _extract_success(self, info: Dict[str, Any], terminated: bool) -> bool:
+        for key in ("success", "is_success"):
+            if key in info:
+                return self._any_true(info[key])
+        return bool(terminated)
+
+    def _extract_env_action_type(self, info: Dict[str, Any], fallback_type: int) -> int:
+        if "action_type_map" in info and isinstance(info["action_type_map"], dict):
+            vals = [int(v) for v in info["action_type_map"].values()]
+            if vals:
+                return int(max(vals))
+        if "action_type" in info:
+            value = info["action_type"]
+            if isinstance(value, dict):
+                vals = [int(v) for v in value.values()]
+                if vals:
+                    return int(max(vals))
+            try:
+                return int(value)
+            except Exception:
+                pass
+        return int(fallback_type)
 
     def stop_worker(self):
         """安全停止推理线程"""
@@ -183,17 +266,33 @@ class BaseRunner:
                 # 记录推理开始时间
                 t_start = time.time()
                 
-                with torch.no_grad():
-                    # 推理结果 action_chunk 通常形状为 (B, pred_horizon, action_dim)
-                    # sample_action 内部已完成反归一化
-                    action_chunk = self.agent.sample_action(obs_batch)
-                    
-                    # 4. 后处理：去掉 Batch 维度，并确保数据在 CPU
-                    if isinstance(action_chunk, torch.Tensor):
-                        action_chunk = action_chunk.detach().cpu().numpy()
-                    
-                    if action_chunk.ndim == 3: # (1, pred_horizon, action_dim)
-                        action_chunk = action_chunk[0]
+                if bool(getattr(self.agent, "uses_env_safe_action", False)):
+                    safe_action = self._get_safe_action(obs)
+                    #print(f"[BaseRunner] 使用 env-safe-action 进行填充: {safe_action}")
+                    pred_horizon = int(
+                        getattr(
+                            getattr(self.cfg, "actor", None),
+                            "pred_horizon",
+                            getattr(self.cfg.env, "pred_horizon", self.act_horizon),
+                        )
+                    )
+                    action_chunk = np.repeat(
+                        np.asarray(safe_action, dtype=np.float32).reshape(1, -1),
+                        pred_horizon,
+                        axis=0,
+                    )
+                else:
+                    with torch.no_grad():
+                        # 推理结果 action_chunk 通常形状为 (B, pred_horizon, action_dim)
+                        # sample_action 内部已完成反归一化
+                        action_chunk = self.agent.sample_action(obs_batch)
+                        
+                        # 4. 后处理：去掉 Batch 维度，并确保数据在 CPU
+                        if isinstance(action_chunk, torch.Tensor):
+                            action_chunk = action_chunk.detach().cpu().numpy()
+                        
+                        if action_chunk.ndim == 3: # (1, pred_horizon, action_dim)
+                            action_chunk = action_chunk[0]
                 
                 t_end = time.time()
                 print(f"[BaseRunner] Inference time: {(t_end - t_start)*1000:.2f}ms")
@@ -221,26 +320,22 @@ class BaseRunner:
         优先通过 wrapper 链获取 get_safe_action，确保命中 MetadataAdapterWrapper
         并返回与 Policy 输出维度一致的扁平化向量。
         """
-        # 1) 首选 wrapper 链：FrameStack -> MetadataAdapter -> Base Env
-        if hasattr(self.env, "has_wrapper_attr") and self.env.has_wrapper_attr("get_safe_action"):
-            safe_fn = self.env.get_wrapper_attr("get_safe_action")
-            safe_action = safe_fn()
-            if isinstance(safe_action, dict):
-                # 防御式处理：若返回 dict，尝试通过 wrapper 链做扁平化
-                if self.env.has_wrapper_attr("flatten_action"):
-                    flatten_fn = self.env.get_wrapper_attr("flatten_action")
-                    return flatten_fn(safe_action).astype(np.float32, copy=False)
-                action_dim = getattr(self.cfg.env, "action_dim", 7)
-                return np.zeros(action_dim, dtype=np.float32)
-            return np.asarray(safe_action, dtype=np.float32)
+        # 1) 首选 wrapper 链：MetadataAdapterWrapper 明确暴露扁平 safe action。
+        try:
+            safe_flatten_fn = self.env.get_wrapper_attr("get_safe_flatten_action")
+            return np.asarray(safe_flatten_fn(), dtype=np.float32)
+        except AttributeError:
+            pass
 
         # 2) 回退到底层环境
         if hasattr(self.env.unwrapped, "get_safe_action"):
             safe_action = self.env.unwrapped.get_safe_action()
             if isinstance(safe_action, dict):
-                if hasattr(self.env, "has_wrapper_attr") and self.env.has_wrapper_attr("flatten_action"):
+                try:
                     flatten_fn = self.env.get_wrapper_attr("flatten_action")
                     return flatten_fn(safe_action).astype(np.float32, copy=False)
+                except AttributeError:
+                    pass
                 action_dim = getattr(self.cfg.env, "action_dim", 7)
                 return np.zeros(action_dim, dtype=np.float32)
             return np.asarray(safe_action, dtype=np.float32)
@@ -257,6 +352,7 @@ class BaseRunner:
         在推理期间的帧用 safe_action 填充。
         """
         print(f"[BaseRunner] 开始执行核心控制循环 (Hz: {self.control_hz})...")
+        #self.env.unwrapped.reset(options={"sync_master": True})
         obs, _ = self.env.reset()
 
         step_count = 0
@@ -266,6 +362,7 @@ class BaseRunner:
         # 清空当前轨迹缓存
         self.current_traj = {
             'obs': [], 'action': [], 'action_type': [],
+            'success': [], 'intervention': [],
             'rewards': [], 'terminated': [], 'truncated': []
         }
         self.episode_done = False
@@ -313,6 +410,13 @@ class BaseRunner:
 
             # 3. 执行物理动作 (无论是否开始录制，都要 step 环境以维持频率)
             next_obs, reward, terminated, truncated, info = self.env.step(action)
+            #print(action)
+            executed_action = self._flatten_env_action(info.get("actual_action"), action)
+            intervention = self._extract_env_intervened(info)
+            env_action_type = self._extract_env_action_type(
+                info,
+                fallback_type=2 if intervention else action_type,
+            )
 
             # --- 核心改进：若尚未获取第一个 chunk，则跳过记录逻辑 ---
             if not has_started:
@@ -325,8 +429,8 @@ class BaseRunner:
 
             # 存入观测和动作
             self.current_traj['obs'].append(copy.deepcopy(obs))
-            self.current_traj['action'].append(np.array(action))
-            self.current_traj['action_type'].append(action_type)
+            self.current_traj['action'].append(np.asarray(executed_action, dtype=np.float32))
+            self.current_traj['action_type'].append(np.int32(env_action_type))
 
             step_count += 1
 
@@ -336,8 +440,10 @@ class BaseRunner:
 
             # 存入 RL 环境转移状态
             self.current_traj['rewards'].append(reward)
-            self.current_traj['terminated'].append(terminated)
-            self.current_traj['truncated'].append(truncated)
+            self.current_traj['success'].append(self._extract_success(info, terminated))
+            self.current_traj['intervention'].append(bool(intervention))
+            self.current_traj['terminated'].append(bool(terminated))
+            self.current_traj['truncated'].append(bool(truncated))
 
             obs = next_obs
 
@@ -380,14 +486,11 @@ class BaseRunner:
         temp_path = os.path.join(save_dir, traj_name)
         
         with h5py.File(temp_path, 'w') as f:
+            num_actions = len(self.current_traj['action'])
+
             # 1. 存储动作与辅助信息
             f.create_dataset("action", data=np.stack(self.current_traj['action']).astype(np.float32))
             f.create_dataset("action_type", data=np.stack(self.current_traj['action_type']).astype(np.int32))
-            if "policy_action" in self.current_traj and len(self.current_traj["policy_action"]) == len(self.current_traj["action"]):
-                f.create_dataset(
-                    "policy_action",
-                    data=np.stack(self.current_traj["policy_action"]).astype(np.float32),
-                )
             if "runner_action_type" in self.current_traj and len(self.current_traj["runner_action_type"]) == len(self.current_traj["action"]):
                 f.create_dataset(
                     "runner_action_type",
@@ -403,37 +506,51 @@ class BaseRunner:
             obs_group = f.create_group("obs")
             
             # 提取 obs 序列 (处理 FrameStack 产生的时间轴)
-            # 原始 obs 结构示例: {'rgb': (T_stack, C, H, W), 'state': (T_stack, D)}
             raw_obs_list = self.current_traj['obs']
-            
-            # 只提取每个 Step 堆叠序列中的最后一帧 (即当前真实观测)
-            # 最终形状: (T_episode, C, H, W) 和 (T_episode, D)
-            processed_rgb = []
-            processed_state = []
-            for obs in raw_obs_list:
-                # RGB 处理: (T_stack, C, H, W) -> (C, H, W)
-                img = obs['rgb']
-                if isinstance(img, torch.Tensor): img = img.cpu().numpy()
-                if img.ndim == 4: img = img[-1] # 取最后一帧
-                
-                # 转换 float32 (0-1) 为 uint8 (0-255)
-                if img.dtype != np.uint8:
-                    img = (img * 255.0).astype(np.uint8)
-                processed_rgb.append(img)
-                
-                # State 处理: (T_stack, D) -> (D)
-                st = obs['state']
-                if isinstance(st, torch.Tensor): st = st.cpu().numpy()
-                if st.ndim == 2: st = st[-1]
-                processed_state.append(st)
-                
-            obs_group.create_dataset("rgb", data=np.stack(processed_rgb), compression="gzip", compression_opts=4)
-            obs_group.create_dataset("state", data=np.stack(processed_state).astype(np.float32))
+
+            def _to_numpy(value):
+                if isinstance(value, torch.Tensor):
+                    value = value.detach().cpu().numpy()
+                return np.asarray(value)
+
+            def _latest_frame(value):
+                arr = _to_numpy(value)
+                if arr.ndim >= 2 and arr.shape[0] == int(getattr(self.cfg.env, "obs_horizon", 1)):
+                    arr = arr[-1]
+                return arr
+
+            if raw_obs_list:
+                obs_keys = list(raw_obs_list[0].keys())
+                for key in obs_keys:
+                    values = []
+                    for obs in raw_obs_list:
+                        if key not in obs:
+                            continue
+                        arr = _latest_frame(obs[key])
+                        if key == "rgb" and arr.dtype != np.uint8:
+                            arr = np.clip(arr * 255.0, 0.0, 255.0).astype(np.uint8)
+                        elif key != "rgb" and arr.dtype.kind == "f":
+                            arr = arr.astype(np.float32)
+                        values.append(arr)
+                    if not values:
+                        continue
+                    kwargs = {}
+                    if key == "rgb":
+                        kwargs = {"compression": "gzip", "compression_opts": 4}
+                    obs_group.create_dataset(key, data=np.stack(values), **kwargs)
 
             # 3. 存储信号位
             f.create_dataset("rewards", data=np.array(self.current_traj['rewards'], dtype=np.float32))
+            success = self.current_traj.get("success", [])
+            intervention = self.current_traj.get("intervention", [])
+            if len(success) < num_actions:
+                success = list(success) + [False] * (num_actions - len(success))
+            if len(intervention) < num_actions:
+                intervention = list(intervention) + [False] * (num_actions - len(intervention))
+            f.create_dataset("success", data=np.asarray(success[:num_actions], dtype=bool))
             f.create_dataset("terminated", data=np.array(self.current_traj['terminated'], dtype=bool))
             f.create_dataset("truncated", data=np.array(self.current_traj['truncated'], dtype=bool))
+            f.create_dataset("intervention", data=np.asarray(intervention[:num_actions], dtype=bool))
             
             # 4. 存储元数据 (meta/) - 实现全生命周期溯源
             meta_group = f.create_group("meta")
@@ -451,8 +568,8 @@ class BaseRunner:
                 meta_group.create_dataset("env_meta", data=meta_keys_json)
 
             # 属性
-            f.attrs['success'] = bool(np.any(self.current_traj['terminated']))
-            f.attrs['length'] = len(self.current_traj['action'])
+            f.attrs['success'] = bool(np.any(success[:num_actions]))
+            f.attrs['length'] = num_actions
             
         print(f"[BaseRunner] 统一格式轨迹已保存至: {temp_path} (Images compressed as uint8, with meta/)")
         

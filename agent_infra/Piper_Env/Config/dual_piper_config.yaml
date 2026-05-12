@@ -62,5 +62,5 @@ cameras:
   source_resolution: [640, 480]
   crop_resolution: [224, 224]
   fps: 30
-  enable_depth: true
+  enable_depth: false
   depth_required: false

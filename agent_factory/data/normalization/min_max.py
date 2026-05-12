@@ -27,4 +27,13 @@ class MinMaxNormalizer(ActionNormalizer):
     def denormalize(self, x: torch.Tensor) -> torch.Tensor:
         """ x: [B, T, D] or [B, D] """
         # map back to [min, max]
+        if (
+            not bool(self.initialized.item())
+            or not torch.isfinite(self.min_val).all()
+            or not torch.isfinite(self.max_val).all()
+        ):
+            raise RuntimeError(
+                "MinMaxNormalizer is not initialized with finite action statistics. "
+                "Fit it from the training dataset before calling denormalize()."
+            )
         return (x + 1) / 2 * (self.max_val - self.min_val) + self.min_val

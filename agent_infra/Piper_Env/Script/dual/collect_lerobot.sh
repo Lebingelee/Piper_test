@@ -46,10 +46,11 @@ echo "[Launcher] 启动双臂 LeRobot 录制模式..."
 "$PYTHON_BIN" -m agent_infra.Piper_Env.Record.recorder \
   -m lerobot \
   -t "$TASK_NAME" \
-  --task-description "$TASK_DESCRIPTION" \ti
+  --task-description "$TASK_DESCRIPTION" \
   --vcodec "$VCODEC" \
   -ctrl "$CTRL_MODE" \
   -cfg "$CONFIG_PATH" \
   -dual \
   --master "$MASTER_CAN_LEFT" "$MASTER_CAN_RIGHT" \
   --slave "$SLAVE_CAN_LEFT" "$SLAVE_CAN_RIGHT"
+#

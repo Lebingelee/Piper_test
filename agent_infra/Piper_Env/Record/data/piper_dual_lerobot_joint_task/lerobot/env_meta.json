@@ -1,0 +1,108 @@
+{
+  "obs": {
+    "state": {
+      "left_joint_pos": [
+        6
+      ],
+      "left_joint_vel": [
+        6
+      ],
+      "left_ee_pose": [
+        6
+      ],
+      "left_gripper_pos": [
+        1
+      ],
+      "right_joint_pos": [
+        6
+      ],
+      "right_joint_vel": [
+        6
+      ],
+      "right_ee_pose": [
+        6
+      ],
+      "right_gripper_pos": [
+        1
+      ]
+    },
+    "under_control": {
+      "left": [
+        1
+      ],
+      "right": [
+        1
+      ]
+    },
+    "rgb": {
+      "base_camera": [
+        3,
+        224,
+        224
+      ],
+      "left_hand_camera": [
+        3,
+        224,
+        224
+      ],
+      "right_hand_camera": [
+        3,
+        224,
+        224
+      ]
+    },
+    "depth": {
+      "base_camera": [
+        1,
+        224,
+        224
+      ],
+      "left_hand_camera": [
+        1,
+        224,
+        224
+      ],
+      "right_hand_camera": [
+        1,
+        224,
+        224
+      ]
+    }
+  },
+  "action": {
+    "left_arm": [
+      6
+    ],
+    "left_gripper": [
+      1
+    ],
+    "right_arm": [
+      6
+    ],
+    "right_gripper": [
+      1
+    ]
+  },
+  "env_control_mode": "absolute_joint",
+  "controller_backend": "joint",
+  "control": {
+    "arm_entries": [
+      {
+        "name": "left",
+        "action_key": "left_arm",
+        "gripper_action_key": "left_gripper",
+        "state_pose_key": "left_ee_pose",
+        "arm_action_dim": 6,
+        "gripper_action_dim": 1
+      },
+      {
+        "name": "right",
+        "action_key": "right_arm",
+        "gripper_action_key": "right_gripper",
+        "state_pose_key": "right_ee_pose",
+        "arm_action_dim": 6,
+        "gripper_action_dim": 1
+      }
+    ]
+  }
+}

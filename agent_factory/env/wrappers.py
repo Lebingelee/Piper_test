@@ -5,11 +5,6 @@ from typing import Dict, List, Optional, Any
 from gymnasium.spaces import Box, Dict as GymDict
 from collections import deque
 
-try:
-    from mani_skill.utils import common as mani_skill_common
-except ImportError:
-    mani_skill_common = None
-
 class MetadataAdapterWrapper(gym.Wrapper):
     """
     [核心适配器] 元数据驱动的扁平化适配器 (Metadata-Driven Flattened Adapter)。
@@ -161,7 +156,7 @@ class MetadataAdapterWrapper(gym.Wrapper):
         obs, info = self.env.reset(**kwargs)
         return self.observation(obs), info
 
-    def get_safe_action(self):
+    def get_safe_flatten_action(self):
         """
         获取扁平化的安全动作向量。
         1. 调用底层环境的字典式 safe_action。
@@ -173,6 +168,9 @@ class MetadataAdapterWrapper(gym.Wrapper):
         else:
             # 兜底：如果底层没实现，尝试返回全 0
             return np.zeros(self.action_dim, dtype=np.float32)
+
+    def get_safe_action(self):
+        return self.get_safe_flatten_action()
 
     def flatten_action(self, dict_action: Dict[str, np.ndarray]) -> np.ndarray:
         """
@@ -193,11 +191,13 @@ class ManiSkillAdapterWrapper(gym.ObservationWrapper):
     4. 统一输出 Key 为: 'rgb', 'depth', 'state'。
     """
     def __init__(self, env, rgb=True, depth=True, state=True, sep_depth=True):
-        if mani_skill_common is None:
+        try:
+            from mani_skill.utils import common as mani_skill_common
+        except ImportError as exc:
             raise ImportError(
                 "ManiSkillAdapterWrapper requires mani_skill. "
                 "Please install mani_skill when env.library='mani_skill'."
-            )
+            ) from exc
         super().__init__(env)
         self.base_env = env.unwrapped
         self._common = mani_skill_common

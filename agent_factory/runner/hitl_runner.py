@@ -68,6 +68,15 @@ class HITLRunner(BaseRunner):
         with self._override_lock:
             return self.override_active
 
+    def _read_env_override_requested(self) -> bool:
+        base_env = self._unwrapped_env()
+        if hasattr(base_env, "is_teleop_enabled"):
+            try:
+                return bool(base_env.is_teleop_enabled())
+            except Exception:
+                return False
+        return bool(getattr(base_env, "tele_enabled", False))
+
     def _align_action_dim(self, action: np.ndarray) -> np.ndarray:
         """
         将动作向量裁剪/补零到环境动作维度，避免维度漂移导致 step 失败。
@@ -160,7 +169,7 @@ class HITLRunner(BaseRunner):
         """
         保存前统一整理轨迹：
         - 规范 action/action_type 的长度和维度
-        - 对 action_type 做 0/1/2 约束
+        - 对 action_type 做 0/1/2/3 约束
         - 保证 obs 长度为 T+1
         """
         num_actions = len(self.current_traj["action"])
@@ -177,11 +186,11 @@ class HITLRunner(BaseRunner):
                     self.current_traj["policy_action"][i]
                 )
 
-        # 2) action_type 归一化到 {0,1,2}
+        # 2) action_type 归一化到 {0,1,2,3}
         norm_types = []
         for t in self.current_traj["action_type"][:num_actions]:
             t_int = int(t)
-            if t_int not in (0, 1, 2):
+            if t_int not in (0, 1, 2, 3):
                 t_int = 1
             norm_types.append(np.int32(t_int))
         self.current_traj["action_type"] = norm_types
@@ -206,8 +215,14 @@ class HITLRunner(BaseRunner):
                 self._align_action_dim(np.asarray(x, dtype=np.float32)) for x in seq
             ]
 
-        # 3) rewards/terminated/truncated 与动作长度对齐
-        for key, default_val in (("rewards", 0.0), ("terminated", False), ("truncated", False)):
+        # 3) rewards/success/intervention/terminated/truncated 与动作长度对齐
+        for key, default_val in (
+            ("rewards", 0.0),
+            ("success", False),
+            ("intervention", False),
+            ("terminated", False),
+            ("truncated", False),
+        ):
             seq = self.current_traj[key]
             if len(seq) < num_actions:
                 seq = seq + [default_val] * (num_actions - len(seq))
@@ -251,6 +266,8 @@ class HITLRunner(BaseRunner):
             "runner_action_type": [],
             "env_action_type": [],
             "rewards": [],
+            "success": [],
+            "intervention": [],
             "terminated": [],
             "truncated": [],
         }
@@ -266,7 +283,10 @@ class HITLRunner(BaseRunner):
 
         while not self.episode_done:
             manual_override = self._read_override_flag()
-            is_human_override = bool(manual_override or self._env_override_active)
+            env_override_requested = self._read_env_override_requested()
+            is_human_override = bool(
+                manual_override or env_override_requested or self._env_override_active
+            )
 
             # 情况 A: 进入或处于人类接管
             if is_human_override:
@@ -323,12 +343,14 @@ class HITLRunner(BaseRunner):
                 logged_policy_action = policy_action
 
             next_obs, reward, terminated, truncated, info = self.env.step(policy_action)
+            print(policy_action)
             executed_action = self._flatten_env_action(
                 info.get("actual_action"),
                 policy_action,
             )
             env_action_type = self._extract_env_action_type(info, fallback_type=fallback_action_type)
-            self._env_override_active = self._extract_env_intervened(info)
+            env_intervened = self._extract_env_intervened(info)
+            self._env_override_active = bool(env_intervened or self._read_env_override_requested())
 
             self.current_traj["obs"].append(copy.deepcopy(obs))
             self.current_traj["action"].append(np.asarray(executed_action, dtype=np.float32))
@@ -337,6 +359,8 @@ class HITLRunner(BaseRunner):
             self.current_traj["runner_action_type"].append(np.int32(fallback_action_type))
             self.current_traj["env_action_type"].append(np.int32(env_action_type))
             self.current_traj["rewards"].append(float(reward))
+            self.current_traj["success"].append(self._extract_success(info, terminated))
+            self.current_traj["intervention"].append(bool(env_intervened))
             self.current_traj["terminated"].append(bool(terminated))
             self.current_traj["truncated"].append(bool(truncated))
 
@@ -356,7 +380,7 @@ class HITLRunner(BaseRunner):
                     f"[HITLRunner] Episode finished. Steps: {step_count} "
                     f"(Terminated: {terminated}, Truncated: {truncated})"
                 )
-                self._save_trajectory()
+                #self._save_trajectory()
                 break
 
     def stop_worker(self):

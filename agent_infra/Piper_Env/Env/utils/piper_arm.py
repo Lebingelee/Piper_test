@@ -30,12 +30,19 @@ class PiperArm:
         self.master_can = master_can
         self.follower_can = follower_can
         self.name = name
-        self.init_joint_pos = init_joint_pos
+        self.init_joint_pos = np.asarray(init_joint_pos, dtype=np.float32).reshape(6)
         self.init_gripper_pos = self._clip_gripper_width(init_gripper_pos)
+        self.last_follower_joint_cmd = self.init_joint_pos.copy()
+        self.last_follower_pose_cmd = get_pose(self.init_joint_pos.tolist()).astype(np.float32)
         self.last_follower_gripper_cmd = self.init_gripper_pos
         self.last_master_gripper_cmd = self.init_gripper_pos
         self.joint_hold_deadband = 1e-4
         self._master_follow_active = False
+        self._master_follow_primed = False
+        self._master_follow_warmup_sec = 0.20
+        self._master_follow_catchup_repeats = 5
+        self._master_follow_catchup_interval = 0.01
+        self._master_follow_large_error_rad = 0.20
         
         # 1. 硬件句柄占位
         self.master = None
@@ -88,7 +95,10 @@ class PiperArm:
         """获取从臂 (Follower) 的标准化状态，对齐 agent_infra 规范"""
         # A. 关节角度
         ja = self.follower.get_joint_angles()
-        joint_pos = np.array(ja.msg if ja else [0.0]*6, dtype=np.float32)
+        joint_pos = self._coerce_joint_feedback(
+            ja,
+            fallback=self.last_follower_joint_cmd,
+        )
         
         # B. 关节速度 (通过 motor_states 获取)
         joint_vel = []
@@ -99,7 +109,10 @@ class PiperArm:
         
         # C. 末端法兰位姿 [x, y, z, roll, pitch, yaw]
         fp = self.follower.get_flange_pose()
-        ee_pose = np.array(fp.msg if fp else [0.0]*6, dtype=np.float32)
+        ee_pose = self._coerce_pose_feedback(
+            fp,
+            fallback=self.last_follower_pose_cmd,
+        )
         
         # D. 夹爪宽度 (m). Prefer physical feedback over control feedback; the
         # latter may report a default 0.0 while the gripper is simply idle.
@@ -176,8 +189,11 @@ class PiperArm:
 
         if mode == "pose":
             self.follower.move_p(arm_action.tolist())
+            self.last_follower_pose_cmd = arm_action.copy()
         elif mode == "delta_pose":
-            self.follower.move_p(self._pose_from_delta(arm_action).tolist())
+            target_pose = self._pose_from_delta(arm_action)
+            self.follower.move_p(target_pose.tolist())
+            self.last_follower_pose_cmd = target_pose.copy()
         elif mode == "relative_pose_chunk":
             current_pose = self._get_current_ee_pose()
             for delta_pose in arm_action.reshape(-1, 6):
@@ -185,6 +201,7 @@ class PiperArm:
                     continue
                 current_pose = current_pose + delta_pose.astype(np.float32)
                 self.follower.move_p(current_pose.tolist())
+            self.last_follower_pose_cmd = current_pose.copy()
         else:
             curr_ja = self.follower.get_joint_angles()
             if curr_ja is not None:
@@ -201,6 +218,10 @@ class PiperArm:
                     self.follower.move_j(arm_action.tolist())
                 else:
                     self.follower.move_js(arm_action.tolist())
+            else:
+                self.follower.move_j(arm_action.tolist())
+            self.last_follower_joint_cmd = arm_action.copy()
+            self.last_follower_pose_cmd = get_pose(arm_action.tolist()).astype(np.float32)
         
         self._move_gripper(self.follower_eff, gripper_action, remember_as="follower")
 
@@ -220,10 +241,39 @@ class PiperArm:
 
     def _get_current_ee_pose(self) -> np.ndarray:
         fp = self.follower.get_flange_pose()
-        return np.array(fp.msg if fp else [0.0] * 6, dtype=np.float32)
+        return self._coerce_pose_feedback(
+            fp,
+            fallback=self.last_follower_pose_cmd,
+        )
 
     def _pose_from_delta(self, delta_pose: np.ndarray) -> np.ndarray:
         return self._get_current_ee_pose() + np.asarray(delta_pose, dtype=np.float32).reshape(6)
+
+    @staticmethod
+    def _coerce_joint_feedback(msg, fallback: np.ndarray) -> np.ndarray:
+        fallback = np.asarray(fallback, dtype=np.float32).reshape(6)
+        if msg is None or not hasattr(msg, "msg"):
+            return fallback.copy()
+        joint_pos = np.asarray(msg.msg, dtype=np.float32).reshape(-1)
+        if joint_pos.shape[0] < 6:
+            return fallback.copy()
+        joint_pos = joint_pos[:6].astype(np.float32, copy=False)
+        if np.allclose(joint_pos, 0.0, atol=1e-7) and not np.allclose(fallback, 0.0, atol=1e-7):
+            return fallback.copy()
+        return joint_pos.copy()
+
+    @staticmethod
+    def _coerce_pose_feedback(msg, fallback: np.ndarray) -> np.ndarray:
+        fallback = np.asarray(fallback, dtype=np.float32).reshape(6)
+        if msg is None or not hasattr(msg, "msg"):
+            return fallback.copy()
+        pose = np.asarray(msg.msg, dtype=np.float32).reshape(-1)
+        if pose.shape[0] < 6:
+            return fallback.copy()
+        pose = pose[:6].astype(np.float32, copy=False)
+        if np.allclose(pose, 0.0, atol=1e-7) and not np.allclose(fallback, 0.0, atol=1e-7):
+            return fallback.copy()
+        return pose.copy()
 
     def _read_gripper_width(
         self,
@@ -405,29 +455,78 @@ class PiperArm:
             return
 
         try:
+            mode_set = False
             if hasattr(self.master, "set_follower_mode"):
                 self.master.set_follower_mode()
-            elif hasattr(self.master, "enable"):
+                mode_set = True
+                print(f"[{self.name}] 主臂进入 policy 跟随模式。")
+            if hasattr(self.master, "enable"):
                 self.master.enable()
+                mode_set = True
+            if not mode_set:
+                print(f"[{self.name}] 当前 SDK 不支持主臂 policy 跟随模式。")
+                return
+            if self._master_follow_warmup_sec > 0.0:
+                time.sleep(self._master_follow_warmup_sec)
             self._master_follow_active = True
+            self._master_follow_primed = False
         except Exception as exc:
             self._master_follow_active = False
+            self._master_follow_primed = False
             print(f"[{self.name}] 主臂进入跟随模式失败: {exc}")
 
-    def end_master_follow(self):
+    def end_master_follow(self, force: bool = False):
         """恢复主臂到可人工拖动状态。"""
-        if self.master is None or not self._master_follow_active:
+        if self.master is None or ((not self._master_follow_active) and (not force)):
             return
 
         try:
+            if hasattr(self.master, "set_leader_mode"):
+                self.master.set_leader_mode()
             if hasattr(self.master, "restore_leader_drag_mode"):
                 self.master.restore_leader_drag_mode()
-            elif hasattr(self.master, "set_leader_mode"):
-                self.master.set_leader_mode()
         except Exception as exc:
             print(f"[{self.name}] 主臂恢复拖动模式失败: {exc}")
         finally:
             self._master_follow_active = False
+            self._master_follow_primed = False
+
+    def _read_master_joint6(self):
+        if self.master is None:
+            return None
+        for fn_name in ("get_joint_angles", "get_leader_joint_angles"):
+            if not hasattr(self.master, fn_name):
+                continue
+            try:
+                msg = getattr(self.master, fn_name)()
+            except Exception:
+                msg = None
+            if msg is not None and hasattr(msg, "msg"):
+                q = np.asarray(msg.msg, dtype=np.float32).reshape(-1)
+                if q.shape[0] >= 6:
+                    return q[:6]
+        return None
+
+    def _command_master_joint_follow(self, joint_target: np.ndarray):
+        move_j = getattr(self.master, "move_j", None)
+        move_js = getattr(self.master, "move_js", None)
+        if move_j is None and move_js is None:
+            return False
+
+        q_now = self._read_master_joint6()
+        use_planned = False
+        if q_now is not None:
+            err = float(np.max(np.abs(np.asarray(q_now, dtype=np.float32) - joint_target)))
+            use_planned = err > self._master_follow_large_error_rad
+
+        cmd = move_j if use_planned and move_j is not None else (move_js or move_j)
+        repeats = self._master_follow_catchup_repeats if not self._master_follow_primed else 1
+        for _ in range(max(1, int(repeats))):
+            cmd(joint_target.tolist())
+            if repeats > 1:
+                time.sleep(self._master_follow_catchup_interval)
+        self._master_follow_primed = True
+        return True
 
     def mirror_follower_state_to_master(
         self,
@@ -443,7 +542,6 @@ class PiperArm:
         if self.master is None:
             return
 
-        self.begin_master_follow()
         if not self._master_follow_active:
             return
 
@@ -454,9 +552,7 @@ class PiperArm:
         try:
             # 保守策略：主臂跟随仅在 joint 模式下启用 move_js，避免 move_j/move_p 触发异常轨迹。
             if control_mode == "joint":
-                if hasattr(self.master, "move_js"):
-                    self.master.move_js(joint_target.tolist())
-                else:
+                if not self._command_master_joint_follow(joint_target):
                     return
             else:
                 return
@@ -477,7 +573,9 @@ class PiperArm:
 
         self.follower.enable()
         time.sleep(0.5)
-        self.follower.move_j(self.init_joint_pos)
+        self.follower.move_j(self.init_joint_pos.tolist())
+        self.last_follower_joint_cmd = self.init_joint_pos.copy()
+        self.last_follower_pose_cmd = get_pose(self.init_joint_pos.tolist()).astype(np.float32)
         self._move_gripper(
             self.follower_eff,
             self.init_gripper_pos,
@@ -511,6 +609,8 @@ class PiperArm:
         self.follower.enable()
         time.sleep(0.5)
         self.follower.move_j(target_joint_pos.tolist())
+        self.last_follower_joint_cmd = target_joint_pos.copy()
+        self.last_follower_pose_cmd = get_pose(target_joint_pos.tolist()).astype(np.float32)
         self._move_gripper(
             self.follower_eff,
             target_gripper_pos,
