@@ -1,2 +1,3 @@
 from .diffusion import DiffusionActorMixin
 from .conditional_diffusion import ConditionalDiffusionActorMixin
+from .cpiql_dac import CPIQLDACActorMixin
