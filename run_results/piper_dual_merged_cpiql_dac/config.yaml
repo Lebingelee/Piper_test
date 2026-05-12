@@ -1,0 +1,67 @@
+agent_type: Diffusion_CPIQL_DAC
+agent_control_mode: absolute_joint
+seed: 42
+soft_update_tau: 0.005
+reward_scale: 100.0
+
+env:
+  env_id: Piper-Dual-Merged
+  library: piper
+  env_config_path: agent_infra/Piper_Env/Config/dual_piper_config.yaml
+  action_dim: 14
+  proprio_dim: 38
+  obs_horizon: 2
+  pred_horizon: 16
+  act_horizon: 8
+  num_cameras: 3
+  obs_mode: rgb
+  env_control_mode: absolute_joint
+  controller_backend: joint
+  control_mode: joint
+  max_episode_steps: 500
+
+train:
+  device: cpu
+  batch_size: 2
+  num_workers: 0
+  save_interval: 100
+  train_object: critic_then_actor
+  dataset_mode: expert_dataset
+  dataset_key: expert_dataset
+  critic_iters: 1
+  actor_iters: 1
+  critic_ckpt_path: ''
+  save_root: run_results
+  exp_name: piper_dual_merged_cpiql_dac
+
+dataset:
+  dataset_type: cpiql
+  include_rgb: true
+  include_depth: false
+  expert:
+    demo_path: data/merged/dual_merged.h5
+    num_traj: null
+    format: auto
+  replaybuffer:
+    max_traj_num: 100
+    folder_path: ''
+    replaybuffer_path: ''
+
+actor:
+  type: cpiql_dac_diffusion
+  obs_horizon: 2
+  action_dim: 14
+  pred_horizon: 16
+  encoder:
+    visual:
+      in_channels: 3
+      backbone_type: resnet
+    proprio_dim: 38
+
+critic:
+  type: cpiql
+  encoder:
+    visual:
+      in_channels: 3
+      backbone_type: resnet
+    proprio_dim: 38

@@ -3,8 +3,21 @@ import os
 import logging
 from typing import Dict, Any
 from omegaconf import OmegaConf
+from agent_factory.control import canonicalize_control_mode, to_legacy_control_mode
 
 logger = logging.getLogger(__name__)
+_SEMANTIC_CONTROL_MODES = {
+    "absolute_joint",
+    "joint",
+    "joint_pos",
+    "absolute_pose",
+    "pose",
+    "delta_pose",
+    "delta_ee_pose",
+    "pd_ee_delta_pose",
+    "delta_joint",
+    "relative_pose_chunk",
+}
 
 class ConfigManager:
     """
@@ -128,9 +141,18 @@ class ConfigManager:
         cameras = piper_cfg.get("cameras", {}) if isinstance(piper_cfg, dict) else {}
 
         arm_count = max(len(robots), 1)
-        control_mode = str(env_cfg.get("control_mode") or common.get("default_control_mode") or "joint")
+        control_mode = str(
+            env_cfg.get("control_mode")
+            or env_cfg.get("env_control_mode")
+            or common.get("default_control_mode")
+            or "joint"
+        )
         chunk_size = int(common.get("relative_pose_chunk_size", 8))
-        arm_action_dim = chunk_size * 6 if control_mode == "relative_pose_chunk" else 6
+        arm_action_dim = (
+            chunk_size * 6
+            if canonicalize_control_mode(control_mode, default="joint") == "relative_pose_chunk"
+            else 6
+        )
 
         action_dim = arm_count * (arm_action_dim + 1)
         proprio_dim = arm_count * 19  # joint_pos(6)+joint_vel(6)+ee_pose(6)+gripper_pos(1)
@@ -143,6 +165,48 @@ class ConfigManager:
             "proprio_dim": int(proprio_dim),
             "num_cameras": int(num_cameras),
         }
+
+    @staticmethod
+    def _sync_control_mode_fields(
+        env_cfg: Dict[str, Any],
+        cfg_dict: Dict[str, Any],
+        user_dict: Dict[str, Any],
+        library: str,
+    ):
+        legacy_mode = env_cfg.get("control_mode")
+        env_mode = env_cfg.get("env_control_mode")
+
+        if env_mode is None and legacy_mode is not None:
+            raw_legacy = str(legacy_mode).strip().lower()
+            if raw_legacy in _SEMANTIC_CONTROL_MODES:
+                env_mode = canonicalize_control_mode(legacy_mode)
+                env_cfg["env_control_mode"] = env_mode
+        elif env_mode is not None:
+            env_cfg["env_control_mode"] = canonicalize_control_mode(env_mode)
+
+        if legacy_mode is None and env_mode is not None:
+            guessed_legacy = None
+            if library == "realman":
+                realman_legacy = {
+                    "absolute_joint": "joint_pos",
+                    "delta_pose": "delta_ee_pose",
+                }
+                guessed_legacy = realman_legacy.get(env_cfg["env_control_mode"])
+            elif library == "mani_skill":
+                maniskill_legacy = {
+                    "delta_pose": "pd_ee_delta_pose",
+                }
+                guessed_legacy = maniskill_legacy.get(env_cfg["env_control_mode"])
+            else:
+                guessed_legacy = to_legacy_control_mode(env_mode, default=str(env_mode))
+            if guessed_legacy is not None:
+                env_cfg["control_mode"] = guessed_legacy
+
+        if (
+            not ConfigManager._dict_has_path(user_dict, ["agent_control_mode"])
+            and env_cfg.get("env_control_mode") is not None
+        ):
+            cfg_dict["agent_control_mode"] = env_cfg["env_control_mode"]
 
     @staticmethod
     def _resolve_env_defaults(cfg_dict: Dict[str, Any], user_dict: Dict[str, Any]) -> Dict[str, Any]:
@@ -194,6 +258,12 @@ class ConfigManager:
                     and not ConfigManager._dict_has_path(user_dict, ["runner", "control_hz"])
                 ):
                     cfg_dict.setdefault("runner", {})["control_hz"] = defaults["default_hz"]
+            if not ConfigManager._dict_has_path(user_dict, ["env", "env_control_mode"]):
+                env_cfg["env_control_mode"] = canonicalize_control_mode(
+                    env_cfg.get("control_mode") or defaults.get("default_control_mode") or "joint_pos"
+                )
+            if not ConfigManager._dict_has_path(user_dict, ["env", "controller_backend"]):
+                env_cfg["controller_backend"] = env_cfg.get("control_mode", defaults.get("default_control_mode", "joint_pos"))
 
         # 对特定库做自动推导（当前先支持 piper）
         if library == "piper" and isinstance(loaded_cfg, dict):
@@ -209,6 +279,12 @@ class ConfigManager:
                     and not ConfigManager._dict_has_path(user_dict, ["runner", "control_hz"])
                 ):
                     cfg_dict.setdefault("runner", {})["control_hz"] = common_cfg["default_hz"]
+                if not ConfigManager._dict_has_path(user_dict, ["env", "env_control_mode"]):
+                    env_cfg["env_control_mode"] = canonicalize_control_mode(
+                        env_cfg.get("control_mode") or common_cfg.get("default_control_mode") or "joint"
+                    )
+                if not ConfigManager._dict_has_path(user_dict, ["env", "controller_backend"]):
+                    env_cfg["controller_backend"] = env_cfg.get("control_mode", common_cfg.get("default_control_mode", "joint"))
 
             inferred = ConfigManager._infer_piper_dims(env_cfg, loaded_cfg)
 
@@ -216,6 +292,15 @@ class ConfigManager:
             for key, val in inferred.items():
                 if not ConfigManager._dict_has_path(user_dict, ["env", key]):
                     env_cfg[key] = val
+
+        if library == "mani_skill" and not ConfigManager._dict_has_path(user_dict, ["env", "env_control_mode"]):
+            env_cfg["env_control_mode"] = canonicalize_control_mode(
+                env_cfg.get("control_mode") or "pd_ee_delta_pose"
+            )
+        if library == "mani_skill" and not ConfigManager._dict_has_path(user_dict, ["env", "controller_backend"]):
+            env_cfg["controller_backend"] = env_cfg.get("control_mode", "pd_ee_delta_pose")
+
+        ConfigManager._sync_control_mode_fields(env_cfg, cfg_dict, user_dict, library)
 
         return cfg_dict
 

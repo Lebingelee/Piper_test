@@ -4,6 +4,13 @@ import h5py
 import json
 import os
 from typing import Optional, List, Dict, Any, Union
+from agent_factory.control import (
+    build_action_transform_meta,
+    canonicalize_control_mode,
+    extract_arm_pose_map_from_flat_state,
+    inverse_transform_action,
+    is_absolute_mode,
+)
 
 # ==================== 0. 基础工具逻辑 ====================
 
@@ -133,6 +140,7 @@ class ExpertDataset(BaseTrajectoryDataset):
         self.rgb_data = []   # List of np.ndarray
         self.state_data = [] # List of np.ndarray
         self.action_data = []
+        self.env_metas = []
         self.terminated = []
         self.rewards = []
         self.values = []
@@ -156,6 +164,8 @@ class ExpertDataset(BaseTrajectoryDataset):
         for i, ref in enumerate(tqdm(self.trajectory_refs, desc="Caching RAM")):
             with h5py.File(ref.file_path, 'r') as f:
                 g = f if ref.traj_key is None else f[ref.traj_key]
+                env_meta = self._load_env_meta(f, g) if self.dataset_format == "structured" else self._load_optional_env_meta(f, g)
+                env_meta = self._normalize_env_meta(env_meta)
                 traj = self._load_flat_trajectory(g) if self.dataset_format == "flat" else self._load_structured_trajectory(f, g)
                 self.rgb_data.append(traj["rgb"])
                 self.state_data.append(traj["state"])
@@ -163,6 +173,7 @@ class ExpertDataset(BaseTrajectoryDataset):
                 act = torch.from_numpy(traj["action"]).float()
                 L = len(act)
                 self.action_data.append(act)
+                self.env_metas.append(env_meta)
                 
                 term = self._load_terminated(g, L)
                 self.terminated.append(term)
@@ -208,8 +219,13 @@ class ExpertDataset(BaseTrajectoryDataset):
             self.conds = None
         
         # 控制模式逻辑
-        self.control_mode = cfg.env.control_mode
-        self.is_abs_mode = ("pos" in self.control_mode) and ("delta" not in self.control_mode)
+        self.agent_control_mode = canonicalize_control_mode(
+            getattr(cfg, "agent_control_mode", getattr(cfg.env, "env_control_mode", getattr(cfg.env, "control_mode", "delta_pose")))
+        )
+        self.env_control_mode = canonicalize_control_mode(
+            getattr(cfg.env, "env_control_mode", getattr(cfg.env, "control_mode", "delta_pose"))
+        )
+        self.is_abs_mode = is_absolute_mode(self.agent_control_mode)
         self.pad_action_arm = torch.zeros((self.action_data[0].shape[1] - 1,)) if not self.is_abs_mode else None
         
         print(f"[ExpertDataset] RAM Caching completed. Trajectories: {len(self.traj_keys)}, Slices: {len(self.slices_all)}")
@@ -238,6 +254,23 @@ class ExpertDataset(BaseTrajectoryDataset):
             "Structured expert dataset requires meta/env_meta or traj/meta/env_meta "
             "to determine flatten key order."
         )
+
+    def _load_optional_env_meta(self, h5_file: h5py.File, traj_group: h5py.Group) -> Dict[str, Any]:
+        try:
+            return self._load_env_meta(h5_file, traj_group)
+        except Exception:
+            return {}
+
+    def _normalize_env_meta(self, env_meta: Dict[str, Any]) -> Dict[str, Any]:
+        env_meta = dict(env_meta or {})
+        env_meta.setdefault("obs", {})
+        env_meta.setdefault("action", {})
+        env_meta["env_control_mode"] = canonicalize_control_mode(
+            env_meta.get("env_control_mode") or getattr(self.cfg.env, "env_control_mode", getattr(self.cfg.env, "control_mode", "delta_pose"))
+        )
+        env_meta.setdefault("controller_backend", getattr(self.cfg.env, "controller_backend", ""))
+        env_meta.setdefault("control", {})
+        return env_meta
 
     def _load_structured_trajectory(self, h5_file: h5py.File, traj_group: h5py.Group) -> Dict[str, np.ndarray]:
         env_meta = self._load_env_meta(h5_file, traj_group)
@@ -333,6 +366,33 @@ class ExpertDataset(BaseTrajectoryDataset):
             "state": torch.from_numpy(state_seq)
         }
 
+    def _slice_env_action_sequence(self, traj_idx: int, start: int, end: int) -> torch.Tensor:
+        act_seq = self.action_data[traj_idx][max(0, start): end]
+        if start < 0:
+            act_seq = torch.cat([act_seq[0].repeat(-start, 1), act_seq], dim=0)
+        if len(act_seq) < self.pred_horizon:
+            act_seq = torch.cat([act_seq, act_seq[-1].unsqueeze(0).repeat(self.pred_horizon - len(act_seq), 1)], dim=0)
+        return act_seq
+
+    def _transform_action_sequence(self, traj_idx: int, start: int, act_seq: torch.Tensor) -> torch.Tensor:
+        if self.agent_control_mode == self.env_metas[traj_idx]["env_control_mode"]:
+            return act_seq
+        state_idx = min(max(0, start), self.state_data[traj_idx].shape[0] - 1)
+        current_poses = extract_arm_pose_map_from_flat_state(
+            self.state_data[traj_idx][state_idx],
+            self.env_metas[traj_idx],
+        )
+        meta = build_action_transform_meta(current_poses=current_poses, env_meta=self.env_metas[traj_idx])
+        transformed = inverse_transform_action(
+            obs=None,
+            next_obs=None,
+            env_action=act_seq.numpy(),
+            env_control_mode=self.env_metas[traj_idx]["env_control_mode"],
+            agent_control_mode=self.agent_control_mode,
+            meta=meta,
+        )
+        return torch.from_numpy(transformed).float()
+
     def __getitem__(self, index):
         traj_idx, start, end, global_idx = self.slices[index]
         L = self.action_data[traj_idx].shape[0]
@@ -348,8 +408,8 @@ class ExpertDataset(BaseTrajectoryDataset):
 
         # 3. Action
         if "action" in self.required_keys:
-            act_seq = self.action_data[traj_idx][max(0, start) : end]
-            if start < 0: act_seq = torch.cat([act_seq[0].repeat(-start, 1), act_seq], dim=0)
+            act_seq = self._slice_env_action_sequence(traj_idx, start, end)
+            act_seq = self._transform_action_sequence(traj_idx, start, act_seq)
             if len(act_seq) < self.pred_horizon:
                 pad_vec = compute_pad_vec(act_seq, self.is_abs_mode, self.pad_action_arm)
                 act_seq = torch.cat([act_seq, pad_vec.unsqueeze(0).repeat(self.pred_horizon - len(act_seq), 1)], dim=0)

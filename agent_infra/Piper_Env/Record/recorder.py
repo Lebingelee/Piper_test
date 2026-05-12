@@ -292,7 +292,10 @@ class DataCollectionManager:
         
         # 获取底层 Meta
         unwrapped = self.env.unwrapped
-        self.env_meta = unwrapped.meta_keys
+        if hasattr(unwrapped, "get_env_metadata"):
+            self.env_meta = unwrapped.get_env_metadata()
+        else:
+            self.env_meta = unwrapped.meta_keys
         
         # 初始化录制器
         if mode == "h5":

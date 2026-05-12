@@ -28,6 +28,11 @@ class OfflineRealManEnv(BaseRobotEnv):
         
         self.hz = hz or self.config['robot'].get('default_hz', 10)
         self.control_mode = control_mode or self.config['robot'].get('default_control_mode', "joint_pos")
+        self.env_control_mode = {
+            "joint_pos": "absolute_joint",
+            "delta_ee_pose": "delta_pose",
+        }[self.control_mode]
+        self.controller_backend = self.control_mode
         self.rotation_type = kwargs.get('rotation_type', "euler")
         
         super().__init__(hz=self.hz)
@@ -67,12 +72,16 @@ class OfflineRealManEnv(BaseRobotEnv):
         """完全模拟 RealmanBaseEnv 和 RealManEnv 的元数据构建逻辑"""
         # A. 状态元数据 (State)
         self.meta_keys["obs"]["state"] = {}
+        arm_entries = []
         for name in self.arm_names:
             prefix = f"{name}_" if len(self.arm_names) > 1 else ""
+            action_key = f"{prefix}arm"
+            gripper_key = f"{prefix}gripper"
+            state_pose_key = f"{prefix}ee_pose"
             self.meta_keys["obs"]["state"].update({
                 f"{prefix}joint_pos": (6,),
                 f"{prefix}joint_vel": (6,),
-                f"{prefix}ee_pose": (6,),
+                state_pose_key: (6,),
                 f"{prefix}gripper_pos": (1,)
             })
 
@@ -95,10 +104,24 @@ class OfflineRealManEnv(BaseRobotEnv):
         arm_dim = 6 if self.control_mode == "joint_pos" else (7 if self.rotation_type == "euler" else 8)
         for name in self.arm_names:
             prefix = f"{name}_" if len(self.arm_names) > 1 else ""
+            action_key = f"{prefix}arm"
+            gripper_key = f"{prefix}gripper"
+            state_pose_key = f"{prefix}ee_pose"
             self.meta_keys["action"].update({
-                f"{prefix}arm": (arm_dim,),
-                f"{prefix}gripper": (1,)
+                action_key: (arm_dim,),
+                gripper_key: (1,)
             })
+            arm_entries.append({
+                "name": name,
+                "action_key": action_key,
+                "gripper_action_key": gripper_key,
+                "state_pose_key": state_pose_key,
+                "arm_action_dim": arm_dim,
+                "gripper_action_dim": 1,
+            })
+        self.control_meta = {"arm_entries": arm_entries}
+        if len(arm_entries) == 1:
+            self.control_meta["eef_pose_key"] = arm_entries[0]["state_pose_key"]
 
     def _setup_spaces(self):
         """定义 Gym 空间"""

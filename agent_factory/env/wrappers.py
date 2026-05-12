@@ -39,12 +39,23 @@ class MetadataAdapterWrapper(gym.Wrapper):
         # 2. 缓存 Action 切片偏移量
         self.action_offsets = {}
         curr_offset = 0
+        flat_low = []
+        flat_high = []
         for k in self.sorted_action_keys:
             shape = self.meta_keys["action"][k]
             length = np.prod(shape)
             self.action_offsets[k] = (curr_offset, curr_offset + length, shape)
             curr_offset += length
+            if isinstance(self.env.action_space, GymDict) and k in self.env.action_space.spaces:
+                space = self.env.action_space.spaces[k]
+                flat_low.append(np.asarray(space.low, dtype=np.float32).reshape(-1))
+                flat_high.append(np.asarray(space.high, dtype=np.float32).reshape(-1))
+            else:
+                flat_low.append(np.full((int(length),), -1.0, dtype=np.float32))
+                flat_high.append(np.full((int(length),), 1.0, dtype=np.float32))
         self.action_dim = curr_offset
+        action_low = np.concatenate(flat_low, axis=0) if flat_low else np.full((self.action_dim,), -1.0, dtype=np.float32)
+        action_high = np.concatenate(flat_high, axis=0) if flat_high else np.full((self.action_dim,), 1.0, dtype=np.float32)
 
         # 3. 重新推断并构建观测空间 (Flattened)
         # 获取一次真实观测来推断最终维度
@@ -61,7 +72,8 @@ class MetadataAdapterWrapper(gym.Wrapper):
         
         # 4. 重新构建动作空间 (Flattened)
         self.action_space = Box(
-            low=-1.0, high=1.0, # 假设动作经过预缩放或环境内部处理
+            low=action_low,
+            high=action_high,
             shape=(self.action_dim,),
             dtype=np.float32
         )

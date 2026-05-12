@@ -19,6 +19,11 @@ class RealmanBaseEnv(BaseRobotEnv):
         self.robot_ips = robot_ips
         self.arm_names = arm_names
         self.control_mode = control_mode
+        self.env_control_mode = {
+            "joint_pos": "absolute_joint",
+            "delta_ee_pose": "delta_pose",
+        }[control_mode]
+        self.controller_backend = control_mode
         self.rotation_type = kwargs.get('rotation_type', "euler")
         
         # 记录默认初始化参数 (兜底用)
@@ -38,12 +43,16 @@ class RealmanBaseEnv(BaseRobotEnv):
     def _setup_meta_keys(self):
         """根据机械臂数量和名称，初始化观测与动作的维度描述"""
         self.meta_keys["obs"]["state"] = {}
+        arm_entries = []
         for name in self.arm_names:
             prefix = f"{name}_" if len(self.arm_names) > 1 else ""
+            action_key = f"{prefix}arm"
+            gripper_key = f"{prefix}gripper"
+            state_pose_key = f"{prefix}ee_pose"
             self.meta_keys["obs"]["state"].update({
                 f"{prefix}joint_pos": (6,),
                 f"{prefix}joint_vel": (6,),
-                f"{prefix}ee_pose": (6,),
+                state_pose_key: (6,),
                 f"{prefix}gripper_pos": (1,)
             })
 
@@ -51,10 +60,24 @@ class RealmanBaseEnv(BaseRobotEnv):
         arm_dim = 6 if self.control_mode == "joint_pos" else (7 if self.rotation_type == "euler" else 8)
         for name in self.arm_names:
             prefix = f"{name}_" if len(self.arm_names) > 1 else ""
+            action_key = f"{prefix}arm"
+            gripper_key = f"{prefix}gripper"
+            state_pose_key = f"{prefix}ee_pose"
             self.meta_keys["action"].update({
-                f"{prefix}arm": (arm_dim,),
-                f"{prefix}gripper": (1,)
+                action_key: (arm_dim,),
+                gripper_key: (1,)
             })
+            arm_entries.append({
+                "name": name,
+                "action_key": action_key,
+                "gripper_action_key": gripper_key,
+                "state_pose_key": state_pose_key,
+                "arm_action_dim": arm_dim,
+                "gripper_action_dim": 1,
+            })
+        self.control_meta = {"arm_entries": arm_entries}
+        if len(arm_entries) == 1:
+            self.control_meta["eef_pose_key"] = arm_entries[0]["state_pose_key"]
 
     def _setup_hardware(self):
         """

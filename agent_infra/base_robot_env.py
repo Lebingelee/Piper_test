@@ -81,3 +81,32 @@ class BaseRobotEnv(gym.Env, ABC):
         建议子类实现，用于紧急制动或初始化。
         """
         raise NotImplementedError
+
+    def get_env_metadata(self) -> Dict[str, Any]:
+        return {
+            "obs": self.meta_keys.get("obs", {}),
+            "action": self.meta_keys.get("action", {}),
+            "env_control_mode": getattr(self, "env_control_mode", ""),
+            "controller_backend": getattr(self, "controller_backend", ""),
+            "control": getattr(self, "control_meta", {}),
+        }
+
+    def get_control_state(self) -> Dict[str, Any]:
+        obs = self._get_obs()
+        state = obs.get("state", {}) if isinstance(obs, dict) else {}
+        control_meta = dict(getattr(self, "control_meta", {}) or {})
+        arm_entries = list(control_meta.get("arm_entries", []) or [])
+        arm_poses = {}
+        for entry in arm_entries:
+            if not isinstance(entry, dict):
+                continue
+            action_key = entry.get("action_key")
+            state_pose_key = entry.get("state_pose_key")
+            if not action_key or not state_pose_key or state_pose_key not in state:
+                continue
+            arm_poses[str(action_key)] = np.asarray(state[state_pose_key], dtype=np.float32).reshape(-1)
+
+        result: Dict[str, Any] = {"arm_poses": arm_poses}
+        if len(arm_poses) == 1:
+            result["arm_pose"] = next(iter(arm_poses.values()))
+        return result

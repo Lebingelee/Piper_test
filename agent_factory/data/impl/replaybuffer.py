@@ -3,8 +3,16 @@ import numpy as np
 import h5py
 import os
 import glob
+import json
 from torch.utils.data.dataset import Dataset
 from typing import Dict, List, Optional, Any
+from agent_factory.control import (
+    build_action_transform_meta,
+    canonicalize_control_mode,
+    extract_arm_pose_map_from_flat_state,
+    inverse_transform_action,
+    is_absolute_mode,
+)
 from agent_factory.data.base import BaseTrajectoryDataset
 from agent_factory.data.utils import compute_rl_signals
 
@@ -21,6 +29,37 @@ def _action_dataset_key(h5_file: h5py.File) -> str:
     if "actions" in h5_file and isinstance(h5_file["actions"], h5py.Dataset):
         return "actions"
     raise KeyError("Replay H5 requires flat 'action' dataset.")
+
+
+def _read_json_dataset(dataset) -> Dict[str, Any]:
+    value = dataset[()]
+    if isinstance(value, bytes):
+        value = value.decode("utf-8")
+    elif isinstance(value, np.ndarray) and value.shape == ():
+        value = value.item()
+        if isinstance(value, bytes):
+            value = value.decode("utf-8")
+    return json.loads(value)
+
+
+def _load_env_meta(h5_file: h5py.File, traj_group: h5py.Group) -> Dict[str, Any]:
+    if "meta" in h5_file and "env_meta" in h5_file["meta"]:
+        return _read_json_dataset(h5_file["meta"]["env_meta"])
+    if "meta" in traj_group and isinstance(traj_group["meta"], h5py.Group) and "env_meta" in traj_group["meta"]:
+        return _read_json_dataset(traj_group["meta"]["env_meta"])
+    return {}
+
+
+def _normalize_env_meta(cfg, env_meta: Dict[str, Any]) -> Dict[str, Any]:
+    env_meta = dict(env_meta or {})
+    env_meta.setdefault("obs", {})
+    env_meta.setdefault("action", {})
+    env_meta["env_control_mode"] = canonicalize_control_mode(
+        env_meta.get("env_control_mode") or getattr(cfg.env, "env_control_mode", getattr(cfg.env, "control_mode", "delta_pose"))
+    )
+    env_meta.setdefault("controller_backend", getattr(cfg.env, "controller_backend", ""))
+    env_meta.setdefault("control", {})
+    return env_meta
 
 # ==================== 1. FileReplayBuffer (物理文件视图) ====================
 
@@ -46,6 +85,7 @@ class FileReplayBuffer(BaseTrajectoryDataset):
         self.rewards_all = []
         self.values_all = []
         self.terminated_all = []
+        self.env_meta_all = []
         
         global_count = 0
         for i, ref in enumerate(self.trajectory_refs):
@@ -53,6 +93,7 @@ class FileReplayBuffer(BaseTrajectoryDataset):
                 g = f if ref.traj_key is None else f[ref.traj_key]
                 action_key = _action_dataset_key(g)
                 L = g[action_key].shape[0]
+                self.env_meta_all.append(_normalize_env_meta(cfg, _load_env_meta(f, g)))
                 term = g["terminated"][()] if "terminated" in g else np.zeros(L, dtype=bool)
                 is_suc = np.any(term)
                 
@@ -88,7 +129,13 @@ class FileReplayBuffer(BaseTrajectoryDataset):
             self.required_keys.add("action")
         
         # 3. 动态配置
-        self.is_abs_mode = ("pos" in cfg.env.control_mode) and ("delta" not in cfg.env.control_mode)
+        self.agent_control_mode = canonicalize_control_mode(
+            getattr(cfg, "agent_control_mode", getattr(cfg.env, "env_control_mode", getattr(cfg.env, "control_mode", "delta_pose")))
+        )
+        self.env_control_mode = canonicalize_control_mode(
+            getattr(cfg.env, "env_control_mode", getattr(cfg.env, "control_mode", "delta_pose"))
+        )
+        self.is_abs_mode = is_absolute_mode(self.agent_control_mode)
         self.pad_action_arm = None 
         
         # Cond 占位
@@ -124,10 +171,25 @@ class FileReplayBuffer(BaseTrajectoryDataset):
             act_all = traj_group[_action_dataset_key(traj_group)][()]
             if self.pad_action_arm is None and not self.is_abs_mode: self.pad_action_arm = torch.zeros((act_all.shape[1]-1,))
             act_seq = torch.from_numpy(act_all[max(0, start) : start + self.pred_horizon]).float()
-            if start < 0: act_seq = torch.cat([act_seq[0].repeat(-start, 1), act_seq], dim=0)
+            if start < 0:
+                act_seq = torch.cat([act_seq[0].repeat(-start, 1), act_seq], dim=0)
             if len(act_seq) < self.pred_horizon:
-                pad_vec = compute_pad_vec(act_seq, self.is_abs_mode, self.pad_action_arm)
-                act_seq = torch.cat([act_seq, pad_vec.unsqueeze(0).repeat(self.pred_horizon - len(act_seq), 1)], dim=0)
+                act_seq = torch.cat([act_seq, act_seq[-1].unsqueeze(0).repeat(self.pred_horizon - len(act_seq), 1)], dim=0)
+            if self.agent_control_mode != self.env_meta_all[traj_idx]["env_control_mode"]:
+                state_idx = min(max(0, start), self.trajs_info[traj_idx]["len"] - 1)
+                current_state = traj_group["obs"]["state"][state_idx].astype(np.float32)
+                current_poses = extract_arm_pose_map_from_flat_state(current_state, self.env_meta_all[traj_idx])
+                meta = build_action_transform_meta(current_poses=current_poses, env_meta=self.env_meta_all[traj_idx])
+                act_seq = torch.from_numpy(
+                    inverse_transform_action(
+                        obs=None,
+                        next_obs=None,
+                        env_action=act_seq.numpy(),
+                        env_control_mode=self.env_meta_all[traj_idx]["env_control_mode"],
+                        agent_control_mode=self.agent_control_mode,
+                        meta=meta,
+                    )
+                ).float()
             data["action"] = act_seq
 
         idx = min(max(0, start), L-1)
@@ -159,7 +221,13 @@ class ClassicReplayBuffer(Dataset):
         
         self.buffer = []
         self.slices_all, self.slices_success = [], []
-        self.is_abs_mode = ("pos" in cfg.env.control_mode) and ("delta" not in cfg.env.control_mode)
+        self.agent_control_mode = canonicalize_control_mode(
+            getattr(cfg, "agent_control_mode", getattr(cfg.env, "env_control_mode", getattr(cfg.env, "control_mode", "delta_pose")))
+        )
+        self.env_control_mode = canonicalize_control_mode(
+            getattr(cfg.env, "env_control_mode", getattr(cfg.env, "control_mode", "delta_pose"))
+        )
+        self.is_abs_mode = is_absolute_mode(self.agent_control_mode)
         self.pad_action_arm = None
 
     def push(self, trajectories: Dict[str, List]):
@@ -172,6 +240,12 @@ class ClassicReplayBuffer(Dataset):
                 "action": trajectories[action_key][i],
                 "terminated": trajectories["terminated"][i],
                 "rewards": trajectories["rewards"][i],
+                "env_meta": _normalize_env_meta(
+                    self.cfg,
+                    trajectories.get("env_meta", [{}] * num_new)[i]
+                    if isinstance(trajectories.get("env_meta"), list)
+                    else {},
+                ),
             }
             
             # 动态重计算 RL 信号
@@ -232,10 +306,27 @@ class ClassicReplayBuffer(Dataset):
             act_traj = torch.from_numpy(traj["action"]).float() if isinstance(traj["action"], np.ndarray) else traj["action"]
             if self.pad_action_arm is None and not self.is_abs_mode: self.pad_action_arm = torch.zeros((act_traj.shape[1]-1,))
             act_seq = act_traj[max(0, start) : start + self.pred_horizon]
-            if start < 0: act_seq = torch.cat([act_seq[0].repeat(-start, 1), act_seq], dim=0)
+            if start < 0:
+                act_seq = torch.cat([act_seq[0].repeat(-start, 1), act_seq], dim=0)
             if len(act_seq) < self.pred_horizon:
-                pad_vec = compute_pad_vec(act_seq, self.is_abs_mode, self.pad_action_arm)
-                act_seq = torch.cat([act_seq, pad_vec.unsqueeze(0).repeat(self.pred_horizon - len(act_seq), 1)], dim=0)
+                act_seq = torch.cat([act_seq, act_seq[-1].unsqueeze(0).repeat(self.pred_horizon - len(act_seq), 1)], dim=0)
+            if self.agent_control_mode != traj["env_meta"]["env_control_mode"]:
+                state_idx = min(max(0, start), len(traj["observations"]) - 1)
+                current_state = traj["observations"][state_idx]["state"]
+                if isinstance(current_state, torch.Tensor):
+                    current_state = current_state.detach().cpu().numpy()
+                current_poses = extract_arm_pose_map_from_flat_state(current_state, traj["env_meta"])
+                meta = build_action_transform_meta(current_poses=current_poses, env_meta=traj["env_meta"])
+                act_seq = torch.from_numpy(
+                    inverse_transform_action(
+                        obs=None,
+                        next_obs=None,
+                        env_action=act_seq.detach().cpu().numpy(),
+                        env_control_mode=traj["env_meta"]["env_control_mode"],
+                        agent_control_mode=self.agent_control_mode,
+                        meta=meta,
+                    )
+                ).float()
             data["action"] = act_seq
 
         idx = min(max(0, start), L-1)

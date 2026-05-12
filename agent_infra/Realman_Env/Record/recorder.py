@@ -64,7 +64,8 @@ class DataRecorder:
 
     def _print_welcome(self):
         print(f"\n--- Realman 录制器 [{self.task_name}] ---")
-        print(f" 环境元数据已就绪，Key 结构: {list(self.env.meta_keys['obs'].keys())}")
+        env_meta = self.env.get_env_metadata() if hasattr(self.env, "get_env_metadata") else self.env.meta_keys
+        print(f" 环境元数据已就绪，Key 结构: {list(env_meta['obs'].keys())}")
         print(f" 数据将暂存在: {self.temp_dir}")
         print(" [I] : 机械臂复位 (Move to Init)")
         print(" [S] : 开始录制 (Start)")
@@ -179,7 +180,8 @@ class DataRecorder:
 
             # 2. 保存元数据
             meta_group = f.create_group("meta")
-            meta_group.create_dataset("env_meta", data=json.dumps(self.env.meta_keys))
+            env_meta = self.env.get_env_metadata() if hasattr(self.env, "get_env_metadata") else self.env.meta_keys
+            meta_group.create_dataset("env_meta", data=json.dumps(env_meta))
             
             # 保存本地定义的 EnvMetadata (支持多臂)
             robot_ips = getattr(self.env, 'robot_ips', [getattr(self.env, 'robot_ip', "unknown")])

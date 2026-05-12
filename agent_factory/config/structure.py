@@ -150,6 +150,8 @@ class EnvConfig:
 
     num_cameras: int = 2
     obs_mode: str = "rgb"
+    env_control_mode: str = "delta_pose"
+    controller_backend: str = ""
     control_mode: str = "pd_ee_delta_pose"
     reward_mode: str = "sparse"
     render_mode: str = "rgb_array"
@@ -163,10 +165,19 @@ class EnvConfig:
 
 @dataclass
 class TrainConfig:
+    device: str = "cuda"
     batch_size: int = 32
     num_workers: int = 0
     n_epochs: int = 1000
     save_interval: int = 5000
+    train_object: str = "critic_then_actor"
+    dataset_mode: str = "expert_dataset"
+    dataset_key: str = "expert_dataset"
+    critic_iters: int = 200
+    actor_iters: int = 200
+    critic_ckpt_path: str = ""
+    save_root: str = "run_results"
+    exp_name: str = ""
 
 @dataclass
 class ExpertDatasetConfig:
@@ -177,6 +188,8 @@ class ExpertDatasetConfig:
 @dataclass
 class ReplayBufferConfig:
     max_traj_num: int = 100
+    folder_path: str = ""
+    replaybuffer_path: str = ""
 
 @dataclass
 class RunnerConfig:
@@ -191,10 +204,11 @@ class RunnerConfig:
 
 @dataclass
 class DatasetConfig:
-    
+    dataset_type: str = "cpiql"
     include_rgb: bool = True
     include_depth: bool = False
     expert: ExpertDatasetConfig = field(default_factory=ExpertDatasetConfig)
+    replaybuffer: ReplayBufferConfig = field(default_factory=ReplayBufferConfig)
     replay: ReplayBufferConfig = field(default_factory=ReplayBufferConfig)
 
 # ==================== 4. 全局配置 (Top-Level) ====================
@@ -207,6 +221,7 @@ class GlobalConfig:
     实际构建时会被 registry 替换为具体的子类 (如 DiffusionActorConfig)。
     """
     agent_type: str = "unknown"
+    agent_control_mode: str = "delta_pose"
     device: str = "cuda"
     seed: int = 42
 

@@ -7,6 +7,7 @@ import numpy as np
 from typing import Dict, Any, Optional
 
 from agent_factory.agents.registry import make_agent
+from agent_factory.control import build_action_transform_meta, forward_transform_action
 from agent_factory.env.env_factories import create_env
 from omegaconf import DictConfig
 
@@ -40,6 +41,16 @@ class BaseRunner:
         
         # 从环境配置中读取最大步数 (Single Source of Truth)
         self.max_steps = getattr(cfg.env, 'max_episode_steps', 250)
+        self.agent_control_mode = getattr(
+            cfg,
+            "agent_control_mode",
+            getattr(cfg.env, "env_control_mode", "delta_pose"),
+        )
+        self.env_control_mode = getattr(
+            cfg.env,
+            "env_control_mode",
+            getattr(cfg.env, "control_mode", "delta_pose"),
+        )
         
         # 4. 定义核心容器
         self.obs_queue = queue.Queue(maxsize=1)
@@ -86,6 +97,55 @@ class BaseRunner:
         self.inference_thread.start()
         
         print(f"[BaseRunner] 基础设施初始化完成。Hz: {self.control_hz}, ActHorizon: {self.act_horizon}, 当前存储队列长度: {len(self.saved_files_fifo)}")
+
+    def _unwrapped_env(self):
+        return getattr(self.env, "unwrapped", self.env)
+
+    def _build_forward_transform_meta(self) -> Dict[str, Any]:
+        base_env = self._unwrapped_env()
+        if not hasattr(base_env, "get_control_state"):
+            raise NotImplementedError(
+                "Forward control transform requires env.get_control_state() when agent/env control modes differ."
+            )
+        control_state = base_env.get_control_state()
+        env_meta = (
+            base_env.get_env_metadata()
+            if hasattr(base_env, "get_env_metadata")
+            else {
+                "obs": getattr(base_env, "meta_keys", {}).get("obs", {}),
+                "action": getattr(base_env, "meta_keys", {}).get("action", {}),
+            }
+        )
+        return build_action_transform_meta(
+            current_pose=control_state.get("arm_pose"),
+            current_poses=control_state.get("arm_poses"),
+            env_meta=env_meta,
+        )
+
+    def _transform_policy_chunk_to_env_chunk(self, action_chunk: np.ndarray) -> np.ndarray:
+        chunk = np.asarray(action_chunk, dtype=np.float32)
+        if self.agent_control_mode == self.env_control_mode:
+            return chunk
+        meta = self._build_forward_transform_meta()
+        return forward_transform_action(
+            obs=None,
+            agent_action=chunk,
+            agent_control_mode=self.agent_control_mode,
+            env_control_mode=self.env_control_mode,
+            meta=meta,
+        )
+
+    def _get_env_metadata(self) -> Dict[str, Any]:
+        base_env = self._unwrapped_env()
+        if hasattr(base_env, "get_env_metadata"):
+            return base_env.get_env_metadata()
+        return {
+            "obs": getattr(base_env, "meta_keys", {}).get("obs", {}),
+            "action": getattr(base_env, "meta_keys", {}).get("action", {}),
+            "env_control_mode": getattr(base_env, "env_control_mode", self.env_control_mode),
+            "controller_backend": getattr(base_env, "controller_backend", ""),
+            "control": getattr(base_env, "control_meta", {}),
+        }
 
     def stop_worker(self):
         """安全停止推理线程"""
@@ -231,7 +291,7 @@ class BaseRunner:
                 try:
                     # 非阻塞获取新计划
                     new_chunk = self.action_queue.get_nowait()
-                    current_chunk = new_chunk
+                    current_chunk = self._transform_policy_chunk_to_env_chunk(new_chunk)
                     chunk_pointer = 0  # 重置执行指针
                     is_planning = False # 切换到执行模式
                     has_started = True  # 首次获取到动作，标记开始录制
@@ -384,10 +444,10 @@ class BaseRunner:
             meta_group.create_dataset("env_cfg", data=env_cfg_yaml)
             
             # 存储元数据 Key 结构 (JSON/YAML)
-            unwrapped_env = self.env.unwrapped
-            if hasattr(unwrapped_env, "meta_keys"):
+            env_meta = self._get_env_metadata()
+            if env_meta:
                 import json
-                meta_keys_json = json.dumps(unwrapped_env.meta_keys)
+                meta_keys_json = json.dumps(env_meta)
                 meta_group.create_dataset("env_meta", data=meta_keys_json)
 
             # 属性

@@ -238,6 +238,7 @@ class HITLRunner(BaseRunner):
 
         step_count = 0
         current_chunk = []
+        current_policy_chunk = []
         chunk_pointer = 0
         self.episode_done = False
         is_human_prev = False
@@ -302,7 +303,8 @@ class HITLRunner(BaseRunner):
                 # 尝试拉取最新 chunk（非阻塞）
                 try:
                     new_chunk = self.action_queue.get_nowait()
-                    current_chunk = new_chunk
+                    current_policy_chunk = np.asarray(new_chunk, dtype=np.float32)
+                    current_chunk = self._transform_policy_chunk_to_env_chunk(current_policy_chunk)
                     chunk_pointer = 0
                 except queue.Empty:
                     pass
@@ -310,11 +312,15 @@ class HITLRunner(BaseRunner):
                 # 执行动作或降级 safe_action
                 if chunk_pointer < len(current_chunk):
                     policy_action = np.asarray(current_chunk[chunk_pointer], dtype=np.float32)
+                    logged_policy_action = np.asarray(current_policy_chunk[chunk_pointer], dtype=np.float32)
                     chunk_pointer += 1
                     fallback_action_type = 0
                 else:
                     policy_action = self._get_safe_action(obs)
+                    logged_policy_action = policy_action
                     fallback_action_type = 1
+            if is_human_override or (is_human_prev and (not is_human_override)):
+                logged_policy_action = policy_action
 
             next_obs, reward, terminated, truncated, info = self.env.step(policy_action)
             executed_action = self._flatten_env_action(
@@ -326,7 +332,7 @@ class HITLRunner(BaseRunner):
 
             self.current_traj["obs"].append(copy.deepcopy(obs))
             self.current_traj["action"].append(np.asarray(executed_action, dtype=np.float32))
-            self.current_traj["policy_action"].append(np.asarray(policy_action, dtype=np.float32))
+            self.current_traj["policy_action"].append(np.asarray(logged_policy_action, dtype=np.float32))
             self.current_traj["action_type"].append(np.int32(env_action_type))
             self.current_traj["runner_action_type"].append(np.int32(fallback_action_type))
             self.current_traj["env_action_type"].append(np.int32(env_action_type))
