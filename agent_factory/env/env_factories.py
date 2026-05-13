@@ -2,6 +2,7 @@ import os
 import yaml
 import gymnasium as gym
 import logging
+import time
 from agent_factory.env.wrappers import UnifiedFrameStackWrapper
 
 logger = logging.getLogger(__name__)
@@ -27,6 +28,39 @@ def _load_env_config(env_cfg):
         raise FileNotFoundError(f"env_config_path not found: {config_path}")
     with open(config_path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f) or {}, config_path
+
+
+def _get_wrapper_attr(env, attr: str):
+    try:
+        if hasattr(env, "get_wrapper_attr"):
+            return env.get_wrapper_attr(attr)
+    except AttributeError:
+        pass
+    return getattr(env, attr, None)
+
+
+def _maybe_start_piper_cameras(env, env_cfg):
+    if not bool(getattr(env_cfg, "auto_start_cameras", True)):
+        return
+
+    start_cameras = _get_wrapper_attr(env, "start_cameras")
+    if start_cameras is None:
+        print("[EnvFactory] Piper camera startup hook not found; visual obs may be dummy frames.")
+        return
+
+    print("[EnvFactory] Starting Piper camera threads...")
+    start_cameras()
+
+    warmup_sec = float(
+        getattr(
+            env_cfg,
+            "camera_warmup_sec",
+            getattr(env_cfg, "camera_warmup", 0.0),
+        )
+    )
+    if warmup_sec > 0.0:
+        print(f"[EnvFactory] Piper camera warmup: {warmup_sec:.2f}s")
+        time.sleep(warmup_sec)
 
 
 def create_env(env_cfg):
@@ -129,5 +163,8 @@ def create_env(env_cfg):
         env = UnifiedFrameStackWrapper(env, num_stack=env_cfg.num_stack)
     elif hasattr(env_cfg, 'obs_horizon') and env_cfg.obs_horizon > 1:
         env = UnifiedFrameStackWrapper(env, num_stack=env_cfg.obs_horizon)
+
+    if library == "piper":
+        _maybe_start_piper_cameras(env, env_cfg)
 
     return env

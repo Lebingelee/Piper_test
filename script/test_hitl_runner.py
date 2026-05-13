@@ -16,9 +16,31 @@ from agent_factory.runner.checkpoint_utils import ensure_action_normalizer_ready
 
 DEFAULT_CONFIG_PATH = "run_results/piper_dual_merged_cpiql_dac/model_config.yaml"
 DEFAULT_CHECKPOINT_PATH = (
-    "run_results/piper_dual_merged_cpiql_dac/cpiql_critic_step_8000.pth"
+    "run_results/piper_dual_merged_cpiql_dac/actor_step_60000.pth"
 )
 DEFAULT_SAVE_DIR = "data/piper_dual_merged_cpiql_dac_hitl_runner"
+
+
+def _start_cameras_if_available(env, warmup: float):
+    start_cameras = None
+    try:
+        if hasattr(env, "get_wrapper_attr"):
+            start_cameras = env.get_wrapper_attr("start_cameras")
+    except AttributeError:
+        start_cameras = None
+
+    if start_cameras is None:
+        start_cameras = getattr(env, "start_cameras", None)
+
+    if start_cameras is None:
+        print("[Test-HITL] Camera startup hook not found; visual obs may be dummy frames.")
+        return
+
+    print("[Test-HITL] Ensuring camera threads are running...")
+    start_cameras()
+    if warmup > 0:
+        print(f"[Test-HITL] Camera warmup: {warmup:.2f}s")
+        time.sleep(warmup)
 
 
 def parse_args():
@@ -35,6 +57,12 @@ def parse_args():
     parser.add_argument("--max-steps", type=int, default=0)
     parser.add_argument("--control-hz", type=int, default=0)
     parser.add_argument("--override-key", default="o")
+    parser.add_argument(
+        "--camera-warmup",
+        type=float,
+        default=1.0,
+        help="Seconds to wait after starting camera threads before rollout.",
+    )
     return parser.parse_args()
 
 
@@ -83,6 +111,7 @@ def main():
     except Exception as e:
         print(f"[Error] Failed to create environment: {e}")
         return
+    _start_cameras_if_available(env, args.camera_warmup)
 
     # 4. 初始化 Agent
     print(f"[Test-HITL] Initializing Agent: {cfg.agent_type} ...")
@@ -101,7 +130,8 @@ def main():
         "Piper master teleop can also intervene through env info."
     )
     if hasattr(env.unwrapped, "switch_passive"):
-        env.unwrapped.switch_passive("false")
+        env.unwrapped.switch_passive("true")
+        #pass
     runner = HITLRunner(cfg=cfg, agent=agent, env=env)
 
     # 6. 执行 Rollout

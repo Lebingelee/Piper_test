@@ -44,7 +44,7 @@ dataset:
   include_rgb: true
   include_depth: false
   expert:
-    demo_path: data/ssh/dual_merged.h5
+    demo_path: data/merged/dual_merged.h5
     num_traj: null
     format: auto
   replaybuffer:

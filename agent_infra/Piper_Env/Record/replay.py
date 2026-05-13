@@ -30,6 +30,7 @@ def replay_h5(env, file_path: str):
         start_t = time.perf_counter()
         action = {key: value[t] for key, value in action_seq.items()}
         env.step(action)
+        #print(action)
         elapsed = time.perf_counter() - start_t
         time.sleep(max(0, (1.0/env.hz) - elapsed))
     print("[Replay] H5 轨迹回放完成。")
@@ -84,7 +85,7 @@ if __name__ == "__main__":
 
     # 初始化环境 (回放通常不开启相机包装器以节省资源)
     env = PiperEnv(config_path=args.config, control_mode=args.control)
-    
+    env.switch_passive('true')
     try:
         if args.format == "h5":
             replay_h5(env, args.input)

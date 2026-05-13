@@ -12,7 +12,7 @@ env:
   server_mode: false
   obs_horizon: 2
   pred_horizon: 48
-  act_horizon: 8
+  act_horizon: 32
   num_cameras: 3
   obs_mode: rgb
   env_control_mode: absolute_joint
@@ -44,7 +44,7 @@ dataset:
   include_rgb: true
   include_depth: false
   expert:
-    demo_path: data/ssh/dual_merged.h5
+    demo_path: data/merged/dual_merged.h5
     num_traj: null
     format: auto
   replaybuffer:

@@ -14,7 +14,7 @@ robots:
     init_gripper_pos: 0.05
 
 common:
-  default_hz: 25
+  default_hz: 20
   default_control_mode: "joint"  # options: "joint", "pose", "delta_pose", "relative_pose_chunk"
   init_wait_time: 0.5
   parallel_reset: true
@@ -37,7 +37,7 @@ cameras:
       camera_format: "MJPG"
       auto_exposure: true
       gain: 0
-      enable_depth: true
+      enable_depth: false
       depth_required: false
       role: "base_camera"
     - serial_number: "CH28822007C"
@@ -46,7 +46,7 @@ cameras:
       camera_format: "MJPG"
       auto_exposure: true
       gain: 0
-      enable_depth: true
+      enable_depth: false
       depth_required: false
       role: "left_hand_camera"
     - serial_number: "CH2592100GJ"
@@ -55,7 +55,7 @@ cameras:
       camera_format: "MJPG"
       auto_exposure: true
       gain: 0
-      enable_depth: true
+      enable_depth: false
       depth_required: false
       role: "right_hand_camera"
 

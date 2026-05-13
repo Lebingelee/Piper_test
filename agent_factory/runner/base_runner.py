@@ -51,6 +51,12 @@ class BaseRunner:
             "env_control_mode",
             getattr(cfg.env, "control_mode", "delta_pose"),
         )
+        self.no_safe_action_gap = bool(
+            getattr(cfg.runner, "no_safe_action_gap", False)
+        )
+        self.planning_wait_sleep = float(
+            getattr(cfg.runner, "planning_wait_sleep", 0.002)
+        )
         
         # 4. 定义核心容器
         self.obs_queue = queue.Queue(maxsize=1)
@@ -98,7 +104,8 @@ class BaseRunner:
         self.inference_thread = threading.Thread(target=self._inference_worker, daemon=True)
         self.inference_thread.start()
         
-        print(f"[BaseRunner] 基础设施初始化完成。Hz: {self.control_hz}, ActHorizon: {self.act_horizon}, 当前存储队列长度: {len(self.saved_files_fifo)}")
+        gap_mode = "wait_no_step" if self.no_safe_action_gap else "safe_action_step"
+        print(f"[BaseRunner] 基础设施初始化完成。Hz: {self.control_hz}, ActHorizon: {self.act_horizon}, GapMode: {gap_mode}, 当前存储队列长度: {len(self.saved_files_fifo)}")
 
     def _unwrapped_env(self):
         return getattr(self.env, "unwrapped", self.env)
@@ -267,6 +274,11 @@ class BaseRunner:
                 t_start = time.time()
                 
                 if bool(getattr(self.agent, "uses_env_safe_action", False)):
+                    if self.no_safe_action_gap:
+                        raise RuntimeError(
+                            "runner.no_safe_action_gap=True is incompatible with "
+                            "agents that require env safe actions."
+                        )
                     safe_action = self._get_safe_action(obs)
                     #print(f"[BaseRunner] 使用 env-safe-action 进行填充: {safe_action}")
                     pred_horizon = int(
@@ -379,6 +391,8 @@ class BaseRunner:
             except queue.Empty: break
         # 首次强制唤醒推理线程
         self.obs_queue.put_nowait(obs)
+        planning_wait_start = time.time()
+        planning_wait_logged = False
 
         import copy
 
@@ -392,9 +406,23 @@ class BaseRunner:
                     chunk_pointer = 0  # 重置执行指针
                     is_planning = False # 切换到执行模式
                     has_started = True  # 首次获取到动作，标记开始录制
+                    if self.no_safe_action_gap:
+                        wait_ms = (time.time() - planning_wait_start) * 1000.0
+                        print(
+                            f"[BaseRunner] action_chunk ready after no-step wait: "
+                            f"{wait_ms:.2f}ms"
+                        )
                 except queue.Empty:
                     # 计划还没来，继续保持 is_planning = True
-                    pass
+                    if self.no_safe_action_gap:
+                        if not planning_wait_logged:
+                            print(
+                                "[BaseRunner] waiting for action_chunk without "
+                                "env.step() or safe_action..."
+                            )
+                            planning_wait_logged = True
+                        time.sleep(max(0.0, self.planning_wait_sleep))
+                        continue
             
             # 2. 动作分发：执行或等待
             if not is_planning:
@@ -451,6 +479,8 @@ class BaseRunner:
             # 当 chunk 执行完毕时，切换回规划模式
             if not is_planning and chunk_pointer >= self.act_horizon:
                 is_planning = True
+                planning_wait_start = time.time()
+                planning_wait_logged = False
                 # 使用最新 obs 请求下一计划, 放入前清空以防 obs 堆积
                 if self.obs_queue.empty():
                     self.obs_queue.put_nowait(obs) 

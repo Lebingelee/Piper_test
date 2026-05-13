@@ -343,7 +343,7 @@ class HITLRunner(BaseRunner):
                 logged_policy_action = policy_action
 
             next_obs, reward, terminated, truncated, info = self.env.step(policy_action)
-            print(policy_action)
+            #print(policy_action)
             executed_action = self._flatten_env_action(
                 info.get("actual_action"),
                 policy_action,

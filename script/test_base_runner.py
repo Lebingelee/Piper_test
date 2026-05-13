@@ -14,11 +14,34 @@ from agent_factory.runner import BaseRunner
 from agent_factory.runner.checkpoint_utils import ensure_action_normalizer_ready
 
 
-DEFAULT_CONFIG_PATH = "run_results/piper_dual_merged_cpiql_dac/model_config.yaml"
+
+DEFAULT_CONFIG_PATH = "run_results/piper_dual_ITQC_plain/model_config.yaml"
 DEFAULT_CHECKPOINT_PATH = (
-    "run_results/piper_dual_merged_cpiql_dac/cpiql_critic_step_8000.pth"
+    "run_results/piper_dual_ITQC_plain/piper_dual_ITQC_pretrain_final.pth"
 )
 DEFAULT_SAVE_DIR = "data/piper_dual_merged_cpiql_dac_base_runner"
+
+
+def _start_cameras_if_available(env, warmup: float):
+    start_cameras = None
+    try:
+        if hasattr(env, "get_wrapper_attr"):
+            start_cameras = env.get_wrapper_attr("start_cameras")
+    except AttributeError:
+        start_cameras = None
+
+    if start_cameras is None:
+        start_cameras = getattr(env, "start_cameras", None)
+
+    if start_cameras is None:
+        print("[Test-Base] Camera startup hook not found; visual obs may be dummy frames.")
+        return
+
+    print("[Test-Base] Ensuring camera threads are running...")
+    start_cameras()
+    if warmup > 0:
+        print(f"[Test-Base] Camera warmup: {warmup:.2f}s")
+        time.sleep(warmup)
 
 
 def parse_args():
@@ -34,6 +57,23 @@ def parse_args():
     parser.add_argument("--save-dir", default=DEFAULT_SAVE_DIR)
     parser.add_argument("--max-steps", type=int, default=0)
     parser.add_argument("--control-hz", type=int, default=0)
+    parser.add_argument(
+        "--no-safe-action-gap",
+        action="store_true",
+        help="Wait for the next policy chunk without env.step() or safe_action during planning gaps.",
+    )
+    parser.add_argument(
+        "--planning-wait-sleep",
+        type=float,
+        default=0.002,
+        help="Sleep interval while waiting for a policy chunk in --no-safe-action-gap mode.",
+    )
+    parser.add_argument(
+        "--camera-warmup",
+        type=float,
+        default=1.0,
+        help="Seconds to wait after starting camera threads before rollout.",
+    )
     return parser.parse_args()
 
 
@@ -78,6 +118,7 @@ def main():
     except Exception as e:
         print(f"[Error] Failed to create environment: {e}")
         return
+    _start_cameras_if_available(env, args.camera_warmup)
 
     # 3. 初始化 Agent
     print(f"[Test-Base] Initializing Agent: {cfg.agent_type} ...")
@@ -88,6 +129,12 @@ def main():
         ensure_action_normalizer_ready(agent, cfg)
     agent.to(device)
     agent.eval()
+
+    # Runner-only diagnostic knobs must be attached after make_agent().
+    # make_agent() merges cfg into structured agent defaults, whose RunnerConfig
+    # intentionally does not know about this temporary hardware test flag.
+    cfg.runner.no_safe_action_gap = bool(args.no_safe_action_gap)
+    cfg.runner.planning_wait_sleep = float(args.planning_wait_sleep)
 
     # 4. 初始化 BaseRunner
     print("[Test-Base] Initializing BaseRunner ...")
