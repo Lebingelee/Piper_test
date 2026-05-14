@@ -106,6 +106,20 @@ class BaseAgent(nn.Module, ABC):
         from agent_factory.data.utils import preprocess_obs
         return preprocess_obs(obs_dict, self.device)
 
+    def get_risk(self, obs: Any, action: Any) -> bool:
+        """
+        Optional deployment-time risk hook.
+
+        Args:
+            obs: current observation in the runner-provided inference format.
+            action: current policy rollout action associated with ``obs``.
+
+        Returns:
+            bool: whether the policy considers this state-action pair risky.
+        """
+        del obs, action
+        return False
+
     def _collect_action_sources(self, dataset: Any) -> List[Any]:
         """
         从多种 dataset 结构中递归收集可用于拟合归一化器的数据源。

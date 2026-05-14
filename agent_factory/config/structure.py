@@ -201,6 +201,12 @@ class RunnerConfig:
     hitl_override_key: str = "t"
     hitl_source: str = "keyboard"  # reserved: keyboard / hardware
     hitl_finalize_intervention: bool = True
+    no_safe_action_gap: bool = False
+    planning_wait_sleep: float = 0.002
+    risk_check_hz: float = 0.0
+    risk_use_safe_action: bool = True
+    deploy_continue_key: str = "c"
+    deploy_save_key: str = "s"
 
 @dataclass
 class DatasetConfig:

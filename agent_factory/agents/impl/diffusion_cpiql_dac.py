@@ -48,6 +48,10 @@ class DiffusionCPIQLDACAgent(MainMixin, CPIQLDACActorMixin, CPIQLCriticMixin, Ba
         self.step += 1
         return self.update_actor(batch)
 
+    def get_risk(self, obs, action) -> bool:
+        del obs, action
+        return False
+
     def _make_infinite_iterator(self, loader):
         while True:
             for batch in loader:
