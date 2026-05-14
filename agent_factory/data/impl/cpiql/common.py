@@ -145,6 +145,12 @@ def _read_meta(h5_file: h5py.File, traj_group: h5py.Group) -> Dict[str, Any]:
     return {}
 
 
+def _is_external_intervention_boundary(reason: Any) -> bool:
+    if reason is None:
+        return False
+    return str(reason).strip().lower() in {"teleop_start"}
+
+
 def load_flatten_trajectory(h5_file: h5py.File, traj_group: h5py.Group, include_rgb: bool = True) -> Dict[str, np.ndarray]:
     if "obs" not in traj_group or "action" not in traj_group:
         raise KeyError(f"CPIQL trajectory {traj_group.name} requires 'obs' and 'action' keys.")
@@ -186,6 +192,7 @@ def load_flatten_trajectory(h5_file: h5py.File, traj_group: h5py.Group, include_
         "success": np.asarray(traj_group["success"][()], dtype=bool).reshape(-1)[:length],
         "terminated": np.asarray(traj_group["terminated"][()], dtype=bool).reshape(-1)[:length],
         "truncated": np.asarray(traj_group["truncated"][()], dtype=bool).reshape(-1)[:length],
+        "boundary_reason": traj_group.attrs.get("boundary_reason", ""),
     }
 
 
@@ -327,6 +334,14 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
                     and end_idx + 1 < len(intervention)
                     and bool(intervention[end_idx + 1])
                 )
+                if (
+                    not end_is_intervention_boundary
+                    and segment_type != "intervention"
+                    and start_idx == 0
+                    and end_idx == len(intervention) - 1
+                    and _is_external_intervention_boundary(traj.get("boundary_reason", ""))
+                ):
+                    end_is_intervention_boundary = True
                 self._append_segment(
                     ref,
                     traj,

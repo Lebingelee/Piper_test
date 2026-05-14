@@ -1,4 +1,5 @@
 import copy
+from dataclasses import asdict, is_dataclass
 import json
 import math
 import os
@@ -208,6 +209,7 @@ class HITLDeployRunner(HITLRunner):
             "risk": [],
             "boundary_reason": [],
         }
+        self._last_closed_action_idx = -1
 
     def _append_record(
         self,
@@ -244,10 +246,13 @@ class HITLDeployRunner(HITLRunner):
         terminated: bool = False,
         truncated: bool = False,
         success: Optional[bool] = None,
+        force: bool = False,
     ) -> bool:
         if not self.current_traj["action"]:
             return False
         idx = len(self.current_traj["action"]) - 1
+        if idx <= self._last_closed_action_idx and not force:
+            return False
         if terminated:
             self.current_traj["terminated"][idx] = True
         if truncated:
@@ -255,6 +260,7 @@ class HITLDeployRunner(HITLRunner):
         if success is not None:
             self.current_traj["success"][idx] = bool(success)
         self.current_traj["boundary_reason"][idx] = str(reason)
+        self._last_closed_action_idx = idx
         return True
 
     def _prompt_binary_success(self) -> bool:
@@ -395,7 +401,7 @@ class HITLDeployRunner(HITLRunner):
 
         with h5py.File(file_path, "w") as h5_file:
             meta_group = h5_file.create_group("meta")
-            meta_group.create_dataset("env_cfg", data=OmegaConf.to_yaml(self.cfg.env))
+            meta_group.create_dataset("env_cfg", data=self._serialize_env_cfg())
             meta_group.create_dataset("env_meta", data=json.dumps(env_meta))
 
             start_idx = 0
@@ -597,6 +603,7 @@ class HITLDeployRunner(HITLRunner):
                     "manual_save",
                     terminated=True,
                     success=final_success,
+                    force=True,
                 )
                 self._ensure_final_obs(obs)
                 self._save_session_trajectory()
@@ -692,6 +699,7 @@ class HITLDeployRunner(HITLRunner):
                             "max_step_save",
                             terminated=True,
                             success=final_success,
+                            force=True,
                         )
                         self._ensure_final_obs(obs)
                         self._save_session_trajectory()
@@ -705,6 +713,12 @@ class HITLDeployRunner(HITLRunner):
 
             if terminated or truncated:
                 self._disable_teleop()
+                self._mark_last_boundary(
+                    "episode_end",
+                    terminated=bool(terminated),
+                    truncated=bool(truncated),
+                    force=True,
+                )
                 self._ensure_final_obs(obs)
                 self._save_session_trajectory()
                 self.episode_done = True
@@ -719,3 +733,21 @@ class HITLDeployRunner(HITLRunner):
         super().stop_worker()
         if self.risk_thread is not None:
             self.risk_thread.join(timeout=1.0)
+
+    def _serialize_env_cfg(self) -> str:
+        try:
+            return OmegaConf.to_yaml(self.cfg.env)
+        except Exception:
+            env_cfg = self.cfg.env
+            if is_dataclass(env_cfg):
+                env_cfg = asdict(env_cfg)
+            elif hasattr(env_cfg, "__dict__"):
+                env_cfg = {
+                    key: value
+                    for key, value in vars(env_cfg).items()
+                    if not key.startswith("_")
+                }
+            try:
+                return json.dumps(env_cfg, ensure_ascii=True, default=str, indent=2)
+            except Exception:
+                return repr(env_cfg)
