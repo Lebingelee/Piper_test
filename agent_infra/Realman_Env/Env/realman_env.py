@@ -192,9 +192,10 @@ class RealManEnv(RealmanBaseEnv):
         if self.passive:
             super()._apply_action(action)
 
-    def switch_passive(self, mode: str):
+    def switch_passive(self, mode: str = "toggle"):
         """控制是否允许动作下发"""
-        self.passive = (mode.lower() == 'true')
+        self.passive = self.resolve_switch_mode(mode, self.passive)
+        return bool(self.passive)
 
     def close(self):
         """释放相机和机械臂资源"""

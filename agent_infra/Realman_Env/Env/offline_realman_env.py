@@ -189,8 +189,12 @@ class OfflineRealManEnv(BaseRobotEnv):
             safe_action[k] = np.zeros(v, dtype=np.float32)
         return safe_action
 
-    def switch_passive(self, mode: str):
-        pass
+    def switch_passive(self, mode: str = "toggle"):
+        self.passive = self.resolve_switch_mode(
+            mode,
+            bool(getattr(self, "passive", False)),
+        )
+        return bool(self.passive)
 
     def close(self):
         pass

@@ -192,11 +192,12 @@ class DualRealManEnv(RealmanBaseEnv):
         if self.passive:
             super()._apply_action(action)
 
-    def switch_passive(self, mode: str):
+    def switch_passive(self, mode: str = "toggle"):
         """切换被动控制模式。
         "true" 开启被动控制（环境直接执行输入的动作），"false" 则关闭（环境不执行动作，保持静止）。
         """
-        self.passive = (mode.lower() == 'true')
+        self.passive = self.resolve_switch_mode(mode, self.passive)
+        return bool(self.passive)
 
     def close(self):
         if hasattr(self, 'camera_group'):

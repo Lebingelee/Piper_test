@@ -57,7 +57,7 @@ if __name__ == "__main__":
         description="Inspect shapes of datasets in an .h5 file whose keys contain given keywords."
     )
     parser.add_argument("-p","--file_path", type=str, 
-                        default='data/merged_cpiql_dac_hitl_deploy_runner/traj_12_0515_0007.h5',
+                        default='data/merged_cpiql_dac_hitl_deploy_runner/traj_10_0514_2356.h5',
                         help="Path to the .h5 file")
     parser.add_argument(
         "-k", "--keywords",

@@ -8,10 +8,6 @@ import yaml
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from pynput import keyboard
-
-
-
 from agent_infra.base_robot_env import BaseRobotEnv
 from agent_infra.Piper_Env.Env.utils.piper_arm import PiperArm
 
@@ -243,12 +239,13 @@ class PiperBaseEnv(BaseRobotEnv):
             grip_act = action[f"{prefix}gripper"][0]
             arm.apply_action(arm_act, grip_act, mode=self.control_mode)
 
-    def switch_passive(self, mode: str):
+    def switch_passive(self, mode: Any = "toggle"):
         """切换被动控制模式。
         "true" 开启被动控制（环境直接执行输入的动作），"false" 则关闭（环境不执行动作，保持静止）。
         """
-        self.passive = (str(mode).lower() == "true")
+        self.passive = self.resolve_switch_mode(mode, self.passive)
         print(f"[PiperBase] Action dispatch: {'ENABLED' if self.passive else 'DISABLED'}")
+        return bool(self.passive)
 
     def _begin_master_sync_reset(self):
         """Hook: 子类可在主臂同步复位前暂停后台线程。"""
@@ -477,8 +474,6 @@ class PiperEnv(PiperBaseEnv):
 
         self.read_thread = threading.Thread(target=self._master_read_thread, daemon=True)
         self.read_thread.start()
-        self.listener = keyboard.Listener(on_press=self._on_press)
-        self.listener.start()
 
         print(
             f"[PiperEnv] Robot Core Ready. Arms: {self.arm_names}, "
@@ -506,14 +501,14 @@ class PiperEnv(PiperBaseEnv):
             name: (1,) for name in self.arm_names
         }
 
-    def set_master_follow(self, enabled: bool):
+    def _set_master_follow_state(self, enabled: Any):
         """
         Runtime switch for policy-phase master-follow.
 
         When enabled, policy-controlled steps mirror follower state back to the
         master arm. Mode switches are only sent at state boundaries.
         """
-        self.master_follow = bool(enabled)
+        self.master_follow = self.parse_bool_mode(enabled)
         if self.master_follow and self.passive and not self.tele_enabled:
             for arm in self.arms.values():
                 arm.begin_master_follow()
@@ -524,11 +519,14 @@ class PiperEnv(PiperBaseEnv):
             f"[PiperEnv] Master-follow during policy control: "
             f"{'ON' if self.master_follow else 'OFF'}"
         )
+        return bool(self.master_follow)
 
-    def switch_master_follow(self, mode: str):
-        self.set_master_follow(str(mode).lower() == "true")
+    def switch_master_follow(self, mode: Any = "toggle"):
+        return self._set_master_follow_state(
+            self.resolve_switch_mode(mode, self.master_follow)
+        )
 
-    def switch_passive(self, mode: str):
+    def switch_passive(self, mode: Any = "toggle"):
         super().switch_passive(mode)
         if self.passive and self.master_follow and not self.tele_enabled:
             for arm in self.arms.values():
@@ -536,9 +534,34 @@ class PiperEnv(PiperBaseEnv):
         elif not self.passive:
             for arm in self.arms.values():
                 arm.end_master_follow(force=True)
+        return bool(self.passive)
 
-    def is_teleop_enabled(self) -> bool:
+    def _set_teleop_state(self, enabled: Any) -> bool:
+        enabled = self.parse_bool_mode(enabled)
+        if self.tele_enabled == enabled:
+            print(f"\n[PiperEnv] Teleoperation Toggle: {'ON' if self.tele_enabled else 'OFF'}")
+            return bool(self.tele_enabled)
+
+        self.tele_enabled = enabled
+        if self.tele_enabled:
+            for arm in self.arms.values():
+                arm.end_master_follow(force=True)
+            with self._lock:
+                for cache in self._master_cache.values():
+                    cache["is_ok"] = False
+                    cache["last_ok_time"] = 0.0
+                    cache["has_leader_joint"] = False
+                    cache["last_leader_joint_time"] = 0.0
+        elif self.passive and self.master_follow:
+            for arm in self.arms.values():
+                arm.begin_master_follow()
+        print(f"\n[PiperEnv] Teleoperation Toggle: {'ON' if self.tele_enabled else 'OFF'}")
         return bool(self.tele_enabled)
+
+    def switch_tele(self, mode: Any = "toggle") -> bool:
+        return self._set_teleop_state(
+            self.resolve_switch_mode(mode, self.tele_enabled)
+        )
 
     def _initialize_master_gripper_cache_from_followers(self):
         for name, arm in self.arms.items():
@@ -571,30 +594,6 @@ class PiperEnv(PiperBaseEnv):
             "Config file not found. Checked paths: "
             f"{cwd_candidate} and {config_candidate}"
         )
-
-    def _on_press(self, key):
-        try:
-            if key.char in ("t", "T"):
-                now = time.time()
-                if now - self._last_teleop_toggle_time < self._teleop_toggle_debounce_sec:
-                    return
-                self._last_teleop_toggle_time = now
-                self.tele_enabled = not self.tele_enabled
-                if self.tele_enabled:
-                    for arm in self.arms.values():
-                        arm.end_master_follow(force=True)
-                    with self._lock:
-                        for cache in self._master_cache.values():
-                            cache["is_ok"] = False
-                            cache["last_ok_time"] = 0.0
-                            cache["has_leader_joint"] = False
-                            cache["last_leader_joint_time"] = 0.0
-                elif self.passive and self.master_follow:
-                    for arm in self.arms.values():
-                        arm.begin_master_follow()
-                print(f"\n[PiperEnv] Teleoperation Toggle: {'ON' if self.tele_enabled else 'OFF'}")
-        except AttributeError:
-            pass
 
     @staticmethod
     def _clip_gripper_width(width: float) -> float:
@@ -701,6 +700,9 @@ class PiperEnv(PiperBaseEnv):
         if restored_teleop is not None:
             self.tele_enabled = restored_teleop
             print(f"[PiperEnv] Reset后恢复Teleop状态: {'ON' if self.tele_enabled else 'OFF'}")
+        if self.passive and self.master_follow and not self.tele_enabled:
+            for arm in self.arms.values():
+                arm.begin_master_follow()
         print("[PiperEnv] 主臂读取线程已恢复。")
 
     def _check_under_control(self, name: str) -> bool:
@@ -881,8 +883,6 @@ class PiperEnv(PiperBaseEnv):
 
     def close(self):
         self._master_running = False
-        if hasattr(self, "listener"):
-            self.listener.stop()
         if hasattr(self, "read_thread"):
             self.read_thread.join(timeout=1.0)
         for arm in self.arms.values():

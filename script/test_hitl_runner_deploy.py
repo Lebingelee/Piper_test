@@ -16,6 +16,7 @@ from agent_factory.runner.hitl_runner_deploy import (
     DEPLOY_QUIT_KEY,
     DEPLOY_START_KEY,
     DEPLOY_STOP_KEY,
+    DEPLOY_TELEOP_KEY,
 )
 from agent_factory.runner.checkpoint_utils import ensure_action_normalizer_ready
 
@@ -24,7 +25,7 @@ DEFAULT_CONFIG_PATH = "run_results/piper_dual_merged_cpiql_dac/model_config.yaml
 DEFAULT_CHECKPOINT_PATH = (
     "run_results/piper_dual_merged_cpiql_dac/actor_step_60000.pth"
 )
-DEFAULT_SAVE_DIR = "data/merged_cpiql_dac_hitl_deploy_runner"
+DEFAULT_SAVE_DIR = "data/hitl_deploy_runner_test"
 
 
 def _start_cameras_if_available(env, warmup: float):
@@ -144,6 +145,7 @@ def main():
             print(
                 f"[Test-HITL-Deploy] Rollout {episode_idx}/{total_msg}. "
                 f"Press '{DEPLOY_INIT_KEY}' to init, "
+                f"'{DEPLOY_TELEOP_KEY}' to teleop, "
                 f"'{DEPLOY_START_KEY}' to start, "
                 f"'{DEPLOY_STOP_KEY}' to stop, "
                 f"'{DEPLOY_QUIT_KEY}' to quit."

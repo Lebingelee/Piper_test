@@ -296,6 +296,8 @@ class DataCollectionManager:
             self.env_meta = unwrapped.get_env_metadata()
         else:
             self.env_meta = unwrapped.meta_keys
+        if hasattr(unwrapped, "switch_master_follow"):
+            unwrapped.switch_master_follow("false")
         
         # 初始化录制器
         if mode == "h5":
@@ -325,7 +327,7 @@ class DataCollectionManager:
         self.listener = keyboard.Listener(on_press=self._on_press)
         self.listener.start()
         if self.teleop_on_start:
-            self._set_teleop(True)
+            self._switch_teleop("true")
 
     def _ensure_control_mode_in_task_name(self, task_name: str) -> str:
         control_mode = str(getattr(self.env.unwrapped, "control_mode", "") or "").lower()
@@ -373,7 +375,9 @@ class DataCollectionManager:
             char = key.char.lower()
             if self._is_prompting_max_step:
                 return
-            if char == 'i':
+            if char == 't':
+                self._toggle_teleop()
+            elif char == 'i':
                 if not self._reset_lock.acquire(blocking=False):
                     print("[I] 复位正在执行，忽略重复按键。")
                     return
@@ -416,14 +420,15 @@ class DataCollectionManager:
         except AttributeError:
             pass
 
-    def _set_teleop(self, enabled: bool):
+    def _switch_teleop(self, mode: str):
         unwrapped = self.env.unwrapped
-        if not hasattr(unwrapped, "tele_enabled"):
-            print("[T] 当前环境不支持 teleop。")
+        if hasattr(unwrapped, "switch_tele"):
+            unwrapped.switch_tele(mode)
             return
+        print("[T] 当前环境不支持 switch_tele。")
 
-        unwrapped.tele_enabled = bool(enabled)
-        print(f"[T] Teleoperation: {'ON' if unwrapped.tele_enabled else 'OFF'}")
+    def _toggle_teleop(self):
+        self._switch_teleop("toggle")
 
     def _handle_max_step_reached(self):
         frame_count = self._record_frame_idx
@@ -572,7 +577,10 @@ class DataCollectionManager:
         info = info or {}
         status_text = "RECORDING" if self.is_recording else "IDLE"
         status_color = (0, 0, 255) if self.is_recording else (0, 200, 0)
-        teleop_enabled = bool(getattr(self.env.unwrapped, "tele_enabled", False))
+        try:
+            teleop_enabled = bool(self.env.unwrapped.get_env_state("teleop"))
+        except Exception:
+            teleop_enabled = False
         intervened = info.get("intervened", False)
         under_control = obs.get("under_control", {})
         uc_parts = []

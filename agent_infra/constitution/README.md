@@ -143,6 +143,38 @@ teleop/HITL env **MUST** 负责：
 
 teleop/HITL env **MUST NOT** 把算法策略、训练 loop 或 loss 写进环境层。
 
+## 3.1 环境状态接口契约
+
+环境自身状态 **MUST** 通过统一的 switch/read 接口管理。对外写状态只允许使用 `switch_*` 方法；对外读状态只允许使用 `get_env_state()`。
+
+`BaseRobotEnv` **MUST** 提供：
+
+- `get_env_state() -> dict`
+- `get_env_state("teleop") -> bool`
+- `get_env_state("passive") -> bool`
+- `get_env_state("master_follow") -> bool`
+- `switch_passive(mode="toggle") -> bool`
+- `switch_tele(mode="toggle") -> bool`
+- `switch_master_follow(mode="toggle") -> bool`
+
+`mode` **MUST** 支持：
+
+- 缺省、`None` 或 `"toggle"`：切换当前状态。
+- `True` / `False`：强制设置目标状态。
+- `"true"` / `"false"`、`"1"` / `"0"`、`"on"` / `"off"`、`"yes"` / `"no"`、`"enable"` / `"disable"`：强制设置目标状态。
+
+状态读取的 canonical key **MUST** 使用：
+
+- `"teleop"`：是否处于遥操/专家接管状态。
+- `"passive"`：是否允许环境真实下发动作。
+- `"master_follow"`：policy 阶段主臂是否跟随从臂。
+
+环境实现 **MUST NOT** 要求上层直接读写 `tele_enabled`、`passive`、`master_follow` 等内部属性。Runner、Recorder、Replay、Script 若需要修改状态，必须调用对应 `switch_*`；若需要读取状态，必须调用 `get_env_state()`。
+
+机器人环境 **MAY** 覆盖 `switch_*` 方法以加入硬件副作用。例如 Piper 的 `switch_tele()` 在进入遥操时释放主臂，在退出遥操时按需恢复 `master_follow`；Piper 的 `switch_master_follow()` 会按需切换主臂 policy 跟随模式。
+
+PiperEnv **MUST NOT** 自己拥有键盘监听器。`t`、`i`、`s`、`e`、`q` 等按键监听必须位于 `Record/`、`Script/` 或 `agent_factory/runner` 等上层调用者；这些调用者通过 `switch_tele()`、`switch_passive()`、`switch_master_follow()` 操作环境状态。
+
 ## 4. `meta_keys` 契约
 
 所有可被上层算法消费的环境 **MUST** 提供 `env.unwrapped.meta_keys`：
@@ -267,7 +299,8 @@ robomimic task env、仿真环境或后续第三方任务环境的数据 **MUST*
 - `observation_space`
 - `meta_keys`
 - `get_safe_action`
-- `switch_passive(mode: str)` for real hardware envs
+- `get_env_state(key=None)`
+- `switch_passive(mode="toggle")` for real hardware envs
 
 HITL 环境 **MUST** 在 `info` 中提供执行动作和接管信号：
 
@@ -287,7 +320,7 @@ runner **MUST NOT** 调用机器人私有 SDK、私有 CAN/IP 逻辑或相机私
 硬件安全规则 **SHOULD** 由具体硬件 env 实现，但以下原则为全局要求：
 
 - 所有真实硬件 env **MUST** 提供 `get_safe_action`。
-- 所有真实硬件 env **MUST** 提供动作下发安全锁 `switch_passive(mode: str)`。
+- 所有真实硬件 env **MUST** 提供动作下发安全锁 `switch_passive(mode="toggle")`。
 - `switch_passive("true")` **MUST** 表示允许 `step()` 中的动作真正下发到硬件。
 - `switch_passive("false")` 或默认未开启状态 **MUST** 表示 `step()` 仍可执行频率控制、观测读取和 `info` 构建，但不得调用底层硬件动作下发接口。
 - 动作下发安全锁 **MUST** 位于环境内部最终硬件 dispatch 边界，例如 `_apply_action()`，并覆盖 policy、safe action、teleop/HITL 覆盖后的动作等所有 `step()` 动作来源。

@@ -21,6 +21,7 @@ DEPLOY_STOP_KEY = "e"
 DEPLOY_CONTINUE_KEY = "c"
 DEPLOY_INIT_KEY = "i"
 DEPLOY_QUIT_KEY = "q"
+DEPLOY_TELEOP_KEY = "t"
 
 
 class HITLDeployRunner(HITLRunner):
@@ -40,6 +41,7 @@ class HITLDeployRunner(HITLRunner):
         self.continue_key: str = str(DEPLOY_CONTINUE_KEY).lower()
         self.init_key: str = str(DEPLOY_INIT_KEY).lower()
         self.quit_key: str = str(DEPLOY_QUIT_KEY).lower()
+        self.teleop_key: str = str(DEPLOY_TELEOP_KEY).lower()
         self.risk_check_hz: float = float(getattr(cfg.runner, "risk_check_hz", 0.0))
         self.risk_use_safe_action: bool = bool(
             getattr(cfg.runner, "risk_use_safe_action", True)
@@ -50,6 +52,7 @@ class HITLDeployRunner(HITLRunner):
         self._stop_requested = False
         self._continue_requested = False
         self._quit_requested = False
+        self._teleop_toggle_requested = False
         self.quit_requested = False
         self._prompt_active = False
 
@@ -93,6 +96,8 @@ class HITLDeployRunner(HITLRunner):
                 elif char == self.quit_key:
                     self._quit_requested = True
                     self.quit_requested = True
+                elif char == self.teleop_key:
+                    self._teleop_toggle_requested = True
 
         self._listener = keyboard.Listener(on_press=_on_press)
         self._listener.start()
@@ -133,6 +138,23 @@ class HITLDeployRunner(HITLRunner):
             if value:
                 self.quit_requested = True
             return value
+
+    def _consume_teleop_toggle_requested(self) -> bool:
+        with self._key_lock:
+            value = self._teleop_toggle_requested
+            self._teleop_toggle_requested = False
+            return value
+
+    def _toggle_env_teleop(self) -> bool:
+        base_env = self._unwrapped_env()
+        if hasattr(base_env, "switch_tele"):
+            try:
+                base_env.switch_tele("toggle")
+                return True
+            except Exception as exc:
+                print(f"[HITLDeployRunner] env teleop toggle failed: {exc}")
+                return False
+        return False
 
     def _risk_worker(self) -> None:
         print("[HITLDeployRunner] 风险线程已启动。")
@@ -211,23 +233,15 @@ class HITLDeployRunner(HITLRunner):
 
     def _disable_teleop(self) -> None:
         base_env = self._unwrapped_env()
-        if not hasattr(base_env, "tele_enabled"):
+        if not hasattr(base_env, "switch_tele"):
             return
-        if not bool(base_env.tele_enabled):
-            return
-
-        base_env.tele_enabled = False
-        if (
-            getattr(base_env, "passive", False)
-            and getattr(base_env, "master_follow", False)
-            and hasattr(base_env, "arms")
-        ):
-            try:
-                for arm in base_env.arms.values():
-                    arm.begin_master_follow()
-            except Exception:
-                pass
-        print("[HITLDeployRunner] 已强制退出遥操状态。")
+        try:
+            teleop_enabled = bool(base_env.get_env_state("teleop"))
+        except Exception:
+            teleop_enabled = False
+        if teleop_enabled:
+            base_env.switch_tele("false")
+            print("[HITLDeployRunner] 已强制退出遥操状态。")
 
     def _refresh_obs_with_safe_step(self, obs: Dict[str, Any]) -> Dict[str, Any]:
         action = self._get_safe_action(obs)
@@ -630,9 +644,11 @@ class HITLDeployRunner(HITLRunner):
             self._start_requested = False
             self._stop_requested = False
             self._quit_requested = False
+            self._teleop_toggle_requested = False
 
         print(
             f"[HITLDeployRunner] 空闲待命：按 {self.init_key} 初始化，"
+            f"按 {self.teleop_key} 切换遥操，"
             f"按 {self.start_key} 从当前状态开始录制，"
             f"录制中按 {self.stop_key} 结束，"
             f"按 {self.quit_key} 退出。"
@@ -644,6 +660,9 @@ class HITLDeployRunner(HITLRunner):
                 print("[HITLDeployRunner] 收到退出指令，结束部署循环。")
                 self.episode_done = True
                 return
+            if self._consume_teleop_toggle_requested():
+                self._toggle_env_teleop()
+                continue
             if self._consume_init_requested():
                 obs = self._reset_for_deploy_init()
                 continue
@@ -660,6 +679,8 @@ class HITLDeployRunner(HITLRunner):
                 print("[HITLDeployRunner] 收到退出指令，当前 rollout 不保存。")
                 self.episode_done = True
                 break
+            if self._consume_teleop_toggle_requested():
+                self._toggle_env_teleop()
 
             stop_requested = self._consume_stop_requested()
             continue_requested = self._consume_continue_requested()

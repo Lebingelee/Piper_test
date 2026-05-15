@@ -35,7 +35,7 @@ class PiperArm:
         self.last_follower_joint_cmd = self.init_joint_pos.copy()
         self.last_follower_pose_cmd = get_pose(self.init_joint_pos.tolist()).astype(np.float32)
         self.last_follower_gripper_cmd = self.init_gripper_pos
-        self.last_master_gripper_cmd = self.init_gripper_pos
+        self.last_master_gripper_cmd = self._follower_to_master_gripper_width(self.init_gripper_pos)
         self.joint_hold_deadband = 1e-4
         self._master_follow_active = False
         self._master_follow_primed = False
@@ -230,7 +230,7 @@ class PiperArm:
         return float(np.clip(float(gripper_pos), GRIPPER_MIN_WIDTH_M, GRIPPER_MAX_WIDTH_M))
 
     @staticmethod
-    def _preprocess_master_gripper_width(raw_width: float) -> float:
+    def _master_to_follower_gripper_width(raw_width: float) -> float:
         return float(
             np.clip(
                 float(raw_width) * MASTER_TO_FOLLOWER_GRIPPER_SCALE,
@@ -238,6 +238,20 @@ class PiperArm:
                 GRIPPER_MAX_WIDTH_M,
             )
         )
+
+    @staticmethod
+    def _follower_to_master_gripper_width(follower_width: float) -> float:
+        return float(
+            np.clip(
+                float(follower_width) / MASTER_TO_FOLLOWER_GRIPPER_SCALE,
+                GRIPPER_MIN_WIDTH_M,
+                GRIPPER_MAX_WIDTH_M,
+            )
+        )
+
+    @staticmethod
+    def _preprocess_master_gripper_width(raw_width: float) -> float:
+        return PiperArm._master_to_follower_gripper_width(raw_width)
 
     def _get_current_ee_pose(self) -> np.ndarray:
         fp = self.follower.get_flange_pose()
@@ -318,12 +332,16 @@ class PiperArm:
             elif remember_as == "master":
                 self.last_master_gripper_cmd = target
 
+    def _move_master_gripper_from_follower_width(self, follower_gripper_pos: float):
+        target = self._follower_to_master_gripper_width(follower_gripper_pos)
+        self._move_gripper(self.master_eff, target, remember_as="master")
+
     def _sync_grippers_after_reset(self, gripper_pos: float, repeat: int = 5, interval: float = 0.03):
         """复位后短时重复下发主/从夹爪目标，降低模式切换期丢指令概率。"""
         target = self._clip_gripper_width(gripper_pos)
         for _ in range(max(1, int(repeat))):
             self._move_gripper(self.follower_eff, target, remember_as="follower")
-            self._move_gripper(self.master_eff, target, remember_as="master")
+            self._move_master_gripper_from_follower_width(target)
             time.sleep(max(0.0, float(interval)))
 
     def _move_master_to_joint(self, joint_pos: np.ndarray, gripper_pos: float, wait_time: float = 1.0):
@@ -438,7 +456,7 @@ class PiperArm:
                     "已跳过主臂主动复位，仅复位从臂。"
                 )
 
-            self._move_gripper(self.master_eff, gripper_pos, remember_as="master")
+            self._move_master_gripper_from_follower_width(gripper_pos)
         except Exception as exc:
             print(f"[{self.name}] 主臂同步归位失败: {exc}")
         finally:
@@ -557,7 +575,7 @@ class PiperArm:
             else:
                 return
 
-            self._move_gripper(self.master_eff, grip_target, remember_as="master")
+            self._move_master_gripper_from_follower_width(grip_target)
         except Exception as exc:
             print(f"[{self.name}] 主臂跟随从臂失败: {exc}")
 

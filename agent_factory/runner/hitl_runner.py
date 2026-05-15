@@ -34,6 +34,7 @@ class HITLRunner(BaseRunner):
         self.prev_state: RunnerState = RunnerState.POLICY
 
         self.override_key: str = str(getattr(cfg.runner, "hitl_override_key", "t")).lower()
+        self.teleop_key: str = str(getattr(cfg.runner, "hitl_teleop_key", "t")).lower()
         self.override_active: bool = False
         self._override_lock = threading.Lock()
 
@@ -54,7 +55,12 @@ class HITLRunner(BaseRunner):
 
         def _on_press(key):
             try:
-                if key.char and key.char.lower() == self.override_key:
+                if not key.char:
+                    return
+                char = key.char.lower()
+                if char == self.teleop_key:
+                    self._toggle_env_teleop()
+                elif char == self.override_key:
                     with self._override_lock:
                         self.override_active = not self.override_active
                     print(f"[HITLRunner] override toggled -> {self.override_active}")
@@ -64,18 +70,29 @@ class HITLRunner(BaseRunner):
         self._listener = keyboard.Listener(on_press=_on_press)
         self._listener.start()
 
+    def _toggle_env_teleop(self) -> bool:
+        base_env = self._unwrapped_env()
+        if hasattr(base_env, "switch_tele"):
+            try:
+                base_env.switch_tele("toggle")
+                return True
+            except Exception as exc:
+                print(f"[HITLRunner] env teleop toggle failed: {exc}")
+                return False
+        return False
+
     def _read_override_flag(self) -> bool:
         with self._override_lock:
             return self.override_active
 
     def _read_env_override_requested(self) -> bool:
         base_env = self._unwrapped_env()
-        if hasattr(base_env, "is_teleop_enabled"):
+        if hasattr(base_env, "get_env_state"):
             try:
-                return bool(base_env.is_teleop_enabled())
-            except Exception:
-                return False
-        return bool(getattr(base_env, "tele_enabled", False))
+                return bool(base_env.get_env_state("teleop"))
+            except (KeyError, AttributeError, TypeError, ValueError):
+                pass
+        return False
 
     def _align_action_dim(self, action: np.ndarray) -> np.ndarray:
         """
