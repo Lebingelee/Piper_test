@@ -618,6 +618,7 @@ class HITLDeployRunner(HITLRunner):
         current_chunk: List[np.ndarray] = []
         current_policy_chunk: List[np.ndarray] = []
         chunk_pointer = 0
+        inference_requested = False
         self.episode_done = False
         risk_triggered = False
         is_human_prev = False
@@ -672,6 +673,7 @@ class HITLDeployRunner(HITLRunner):
             obs = self._refresh_obs_with_safe_step(obs)
 
         self._queue_latest_obs_for_inference(obs)
+        inference_requested = True
 
         while not self.episode_done:
             if self._consume_quit_requested():
@@ -694,6 +696,7 @@ class HITLDeployRunner(HITLRunner):
                 current_chunk = []
                 current_policy_chunk = []
                 chunk_pointer = 0
+                inference_requested = False
 
             if is_human_prev and not is_human_override:
                 self._mark_last_boundary("teleop_end", terminated=True)
@@ -701,8 +704,10 @@ class HITLDeployRunner(HITLRunner):
                 current_chunk = []
                 current_policy_chunk = []
                 chunk_pointer = 0
+                inference_requested = False
                 obs = self._refresh_obs_with_safe_step(obs)
                 self._queue_latest_obs_for_inference(obs)
+                inference_requested = True
                 risk_triggered = False
                 is_human_prev = False
                 continue
@@ -719,6 +724,7 @@ class HITLDeployRunner(HITLRunner):
                     current_chunk = []
                     current_policy_chunk = []
                     chunk_pointer = 0
+                    inference_requested = False
                     risk_triggered = True
                     print("[HITLDeployRunner] 风险指标触发，等待专家接管或继续指令。")
 
@@ -744,8 +750,14 @@ class HITLDeployRunner(HITLRunner):
                 if continue_requested:
                     self._mark_last_boundary("risk_continue", terminated=True)
                     risk_triggered = False
+                    self._clear_action_queue()
+                    current_chunk = []
+                    current_policy_chunk = []
+                    chunk_pointer = 0
+                    inference_requested = False
                     obs = self._refresh_obs_with_safe_step(obs)
                     self._queue_latest_obs_for_inference(obs)
+                    inference_requested = True
                     continue
                 if not self.risk_use_safe_action:
                     time.sleep(max(0.0, self.planning_wait_sleep))
@@ -761,18 +773,33 @@ class HITLDeployRunner(HITLRunner):
                 logged_policy_action = np.asarray(policy_action, dtype=np.float32)
                 fallback_action_type = 1
             else:
-                if chunk_pointer >= len(current_chunk):
-                    self._queue_latest_obs_for_inference(obs)
+                need_chunk = chunk_pointer >= len(current_chunk)
 
-                try:
-                    new_chunk = self.action_queue.get_nowait()
-                    current_policy_chunk = np.asarray(new_chunk, dtype=np.float32)
-                    current_chunk = self._transform_policy_chunk_to_env_chunk(
-                        current_policy_chunk
-                    )
-                    chunk_pointer = 0
-                except queue.Empty:
-                    pass
+                # 和 BaseRunner 对齐：chunk 耗尽后只请求一次新推理。
+                # 等待期间反复投递 obs 会让 Identity replay cursor 被提前推进；
+                # 当前 chunk 未耗尽时接收新 chunk 会造成 replay 跳帧。
+                if need_chunk and not inference_requested:
+                    self._queue_latest_obs_for_inference(obs)
+                    inference_requested = True
+
+                if need_chunk:
+                    try:
+                        new_chunk = self.action_queue.get_nowait()
+                        current_policy_chunk = np.asarray(new_chunk, dtype=np.float32)
+                        current_chunk = self._transform_policy_chunk_to_env_chunk(
+                            current_policy_chunk
+                        )
+                        exec_horizon = min(
+                            int(self.act_horizon),
+                            len(current_policy_chunk),
+                            len(current_chunk),
+                        )
+                        current_policy_chunk = current_policy_chunk[:exec_horizon]
+                        current_chunk = current_chunk[:exec_horizon]
+                        chunk_pointer = 0
+                        inference_requested = False
+                    except queue.Empty:
+                        pass
 
                 if chunk_pointer < len(current_chunk):
                     policy_action = np.asarray(current_chunk[chunk_pointer], dtype=np.float32)

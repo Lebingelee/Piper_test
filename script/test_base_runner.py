@@ -15,9 +15,10 @@ from agent_factory.runner.checkpoint_utils import ensure_action_normalizer_ready
 
 
 
-DEFAULT_CONFIG_PATH = "run_results/piper_dual_ITQC_plain/model_config.yaml"
+#DEFAULT_CONFIG_PATH = "run_results/piper_dual_merged_cpiql_dac/model_config.yaml"
+DEFAULT_CONFIG_PATH = "run_results/identity_piper_runner/config.yaml"
 DEFAULT_CHECKPOINT_PATH = (
-    "run_results/piper_dual_ITQC_plain/piper_dual_ITQC_pretrain_final.pth"
+    "run_results/piper_dual_merged_cpiql_dac/actor_step_60000.pth"
 )
 DEFAULT_SAVE_DIR = "data/piper_dual_merged_cpiql_dac_base_runner"
 

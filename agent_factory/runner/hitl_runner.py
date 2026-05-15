@@ -272,6 +272,7 @@ class HITLRunner(BaseRunner):
         current_chunk = []
         current_policy_chunk = []
         chunk_pointer = 0
+        inference_requested = False
         self.episode_done = False
         is_human_prev = False
 
@@ -297,6 +298,7 @@ class HITLRunner(BaseRunner):
         self._clear_action_queue()
 
         self._queue_latest_obs_for_inference(obs)
+        inference_requested = True
 
         while not self.episode_done:
             manual_override = self._read_override_flag()
@@ -311,7 +313,9 @@ class HITLRunner(BaseRunner):
                 if not is_human_prev:
                     self._clear_action_queue()
                     current_chunk = []
+                    current_policy_chunk = []
                     chunk_pointer = 0
+                    inference_requested = False
                 else:
                     # 接管持续期间持续清理，丢弃潜在 stale chunk。
                     self._clear_action_queue()
@@ -323,9 +327,12 @@ class HITLRunner(BaseRunner):
                 self._switch_state(RunnerState.REPLAN)
                 self._clear_action_queue()
                 current_chunk = []
+                current_policy_chunk = []
                 chunk_pointer = 0
+                inference_requested = False
 
                 self._queue_latest_obs_for_inference(obs)
+                inference_requested = True
                 policy_action = self._get_safe_action(obs)
                 fallback_action_type = 1
 
@@ -333,18 +340,32 @@ class HITLRunner(BaseRunner):
             else:
                 self._switch_state(RunnerState.POLICY)
 
-                # chunk 耗尽时触发新推理
-                if chunk_pointer >= len(current_chunk):
-                    self._queue_latest_obs_for_inference(obs)
+                need_chunk = chunk_pointer >= len(current_chunk)
 
-                # 尝试拉取最新 chunk（非阻塞）
-                try:
-                    new_chunk = self.action_queue.get_nowait()
-                    current_policy_chunk = np.asarray(new_chunk, dtype=np.float32)
-                    current_chunk = self._transform_policy_chunk_to_env_chunk(current_policy_chunk)
-                    chunk_pointer = 0
-                except queue.Empty:
-                    pass
+                # chunk 耗尽时触发一次新推理；等待期间不要反复推进
+                # Identity replay 的内部 cursor，也不要预取后中途替换当前 chunk。
+                if need_chunk and not inference_requested:
+                    self._queue_latest_obs_for_inference(obs)
+                    inference_requested = True
+
+                # 仅当当前 chunk 已耗尽时接收新 chunk。HITL 不能像
+                # latest-policy 模式那样中途替换，否则 replay 会跳帧。
+                if need_chunk:
+                    try:
+                        new_chunk = self.action_queue.get_nowait()
+                        current_policy_chunk = np.asarray(new_chunk, dtype=np.float32)
+                        current_chunk = self._transform_policy_chunk_to_env_chunk(current_policy_chunk)
+                        exec_horizon = min(
+                            int(self.act_horizon),
+                            len(current_policy_chunk),
+                            len(current_chunk),
+                        )
+                        current_policy_chunk = current_policy_chunk[:exec_horizon]
+                        current_chunk = current_chunk[:exec_horizon]
+                        chunk_pointer = 0
+                        inference_requested = False
+                    except queue.Empty:
+                        pass
 
                 # 执行动作或降级 safe_action
                 if chunk_pointer < len(current_chunk):

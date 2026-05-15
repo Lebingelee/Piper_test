@@ -20,7 +20,7 @@ env:
   control_mode: joint
   reward_mode: sparse
   render_mode: rgb_array
-  max_episode_steps: 700
+  max_episode_steps: 600
   gamma: 0.99
   penalty: -150.0
   reward_scale: 100
@@ -52,7 +52,7 @@ dataset:
     folder_path: ''
     replaybuffer_path: ''
 runner:
-  control_hz: 10
+  control_hz: 20
   buffer_capacity: 100
   redundancy_margin: 100
   save_dir: data

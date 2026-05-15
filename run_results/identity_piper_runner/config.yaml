@@ -7,13 +7,13 @@ reward_scale: 100.0
 env:
   env_id: Piper-Dual-Merged
   library: piper
-  env_config_path: /home/lebinge/Desktop/Piper_test/agent_infra/Piper_Env/Config/dual_piper_config.yaml
+  env_config_path: agent_infra/Piper_Env/Config/dual_piper_config.yaml
   action_dim: 14
   proprio_dim: 38
   server_mode: false
   obs_horizon: 2
-  pred_horizon: 64
-  act_horizon: 64
+  pred_horizon: 24
+  act_horizon: 24
   num_cameras: 3
   obs_mode: rgb
   env_control_mode: absolute_joint
@@ -67,8 +67,17 @@ runner:
   hitl_finalize_intervention: true
 actor:
   action_dim: 14
-  pred_horizon: 64
+  pred_horizon: 24
   obs_horizon: 2
   require_env_action_dim_match: true
 critic: null
-agent_sp: {}
+agent_sp:
+  # Optional rollout replay mode for IdentityAgent. Leave path empty to use the
+  # deterministic motion-test chunk. When replay_traj_key is empty, the agent
+  # loads root "action" or concatenates sorted "traj_*/action" datasets.
+  # sample_delay_sec can emulate learned-policy inference latency, e.g. 0.10.
+  sample_delay_sec: 0.1
+  replay_h5_path: 'data/hitl_deploy_runner_test/traj_0_0516_0016.h5'
+  replay_traj_key: ''
+  replay_action_key: action
+  replay_loop: false

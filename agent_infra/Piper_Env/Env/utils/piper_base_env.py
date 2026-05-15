@@ -33,6 +33,15 @@ PIPER_DELTA_POSE_HIGH = np.ones(6, dtype=np.float32)
 PIPER_GRIPPER_LOW = np.array([0.0], dtype=np.float32)
 PIPER_GRIPPER_HIGH = np.array([0.2], dtype=np.float32)
 
+# Teleop guard internals. These are intentionally kept as code-level defaults:
+# users usually only need to tune the warmup time in the env YAML, while these
+# two values define how many stable leader samples are required before follower
+# tracking is released after switching out of master-follow mode.
+TELEOP_ENTER_STABLE_FRAMES = 4
+TELEOP_ENTER_STABLE_JOINT_THRESHOLD_RAD = 0.05
+TELEOP_ENTER_WARMUP_SEC = 0.30
+
+
 
 class PiperBaseEnv(BaseRobotEnv):
     """
@@ -429,6 +438,11 @@ class PiperEnv(PiperBaseEnv):
             common_cfg.get("teleop_toggle_debounce_sec", self._debounce_threshold)
         )
         self._last_teleop_toggle_time = 0.0
+        self._teleop_enabled_time = 0.0
+        self._teleop_enter_warmup_sec = TELEOP_ENTER_WARMUP_SEC
+        
+        self._teleop_stable_frames = TELEOP_ENTER_STABLE_FRAMES
+        self._teleop_stable_joint_threshold = TELEOP_ENTER_STABLE_JOINT_THRESHOLD_RAD
         self._master_gripper_jump_threshold = float(
             common_cfg.get("master_gripper_jump_threshold_m", 0.04)
         )
@@ -461,6 +475,9 @@ class PiperEnv(PiperBaseEnv):
                 "last_ok_time": time.time(),
                 "has_leader_joint": False,
                 "last_leader_joint_time": 0.0,
+                "teleop_ready": False,
+                "teleop_stable_count": 0,
+                "last_teleop_joint": np.full(6, np.nan, dtype=np.float32),
                 "gripper_valid": False,
                 "gripper_candidate": np.nan,
                 "gripper_candidate_count": 0,
@@ -547,12 +564,23 @@ class PiperEnv(PiperBaseEnv):
             for arm in self.arms.values():
                 arm.end_master_follow(force=True)
             with self._lock:
+                self._teleop_enabled_time = time.time()
                 for cache in self._master_cache.values():
                     cache["is_ok"] = False
                     cache["last_ok_time"] = 0.0
                     cache["has_leader_joint"] = False
                     cache["last_leader_joint_time"] = 0.0
-        elif self.passive and self.master_follow:
+                    cache["teleop_ready"] = False
+                    cache["teleop_stable_count"] = 0
+                    cache["last_teleop_joint"][:] = np.nan
+        else:
+            with self._lock:
+                self._teleop_enabled_time = 0.0
+                for cache in self._master_cache.values():
+                    cache["teleop_ready"] = False
+                    cache["teleop_stable_count"] = 0
+                    cache["last_teleop_joint"][:] = np.nan
+        if (not self.tele_enabled) and self.passive and self.master_follow:
             for arm in self.arms.values():
                 arm.begin_master_follow()
         print(f"\n[PiperEnv] Teleoperation Toggle: {'ON' if self.tele_enabled else 'OFF'}")
@@ -657,12 +685,44 @@ class PiperEnv(PiperBaseEnv):
                             cache["last_ok_time"] = time.time()
 
                         if master_state.get("has_leader_joint", False):
+                            leader_joint = np.asarray(
+                                master_state["joint_pos"], dtype=np.float32
+                            ).reshape(-1)[:6]
                             cache["has_leader_joint"] = True
                             cache["last_leader_joint_time"] = time.time()
-                            cache["joint"][:6] = master_state["joint_pos"]
+                            cache["joint"][:6] = leader_joint
                             cache["pose"][:6] = master_state["ee_pose"]
+                            if self.tele_enabled:
+                                prev_joint = cache["last_teleop_joint"]
+                                warmup_done = (
+                                    time.time() - float(self._teleop_enabled_time)
+                                ) >= self._teleop_enter_warmup_sec
+                                if (
+                                    warmup_done
+                                    and np.all(np.isfinite(prev_joint))
+                                    and np.max(np.abs(leader_joint - prev_joint))
+                                    <= self._teleop_stable_joint_threshold
+                                ):
+                                    cache["teleop_stable_count"] += 1
+                                else:
+                                    cache["teleop_stable_count"] = 0
+                                    cache["teleop_ready"] = False
+                                cache["last_teleop_joint"] = leader_joint.copy()
+                                if (
+                                    self._teleop_stable_frames <= 0
+                                    or cache["teleop_stable_count"]
+                                    >= self._teleop_stable_frames
+                                ):
+                                    cache["teleop_ready"] = True
+                            else:
+                                cache["teleop_ready"] = False
+                                cache["teleop_stable_count"] = 0
+                                cache["last_teleop_joint"][:] = np.nan
                         else:
                             cache["has_leader_joint"] = False
+                            cache["teleop_ready"] = False
+                            cache["teleop_stable_count"] = 0
+                            cache["last_teleop_joint"][:] = np.nan
 
                         if master_state.get("has_gripper", False):
                             gripper_width = self._filter_master_gripper(
@@ -716,7 +776,20 @@ class PiperEnv(PiperBaseEnv):
                 current_time - float(cache.get("last_leader_joint_time", 0.0))
                 < self._debounce_threshold
             )
-            return self.tele_enabled and hardware_ok and leader_joint_ready
+            warmup_done = (
+                current_time - float(self._teleop_enabled_time)
+            ) >= self._teleop_enter_warmup_sec
+            stable_ready = (
+                self._teleop_stable_frames <= 0
+                or bool(cache.get("teleop_ready", False))
+            )
+            return (
+                self.tele_enabled
+                and hardware_ok
+                and leader_joint_ready
+                and warmup_done
+                and stable_ready
+            )
 
     def _check_hardware_override(self, name: str) -> bool:
         """不依赖 tele_enabled 的硬件接管检测。"""
