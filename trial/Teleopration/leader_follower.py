@@ -1,7 +1,7 @@
 from pyAgxArm import create_agx_arm_config, AgxArmFactory
 import time
 
-cfg = create_agx_arm_config(robot="piper", comm="can", channel="can_left_master")
+cfg = create_agx_arm_config(robot="piper", comm="can", channel="can_ml")
 robot_leader = AgxArmFactory.create_arm(cfg)
 robot_leader.connect()
 #robot_leader.disable()

@@ -69,7 +69,7 @@ class PiperBaseEnv(BaseRobotEnv):
         self.default_init_gripper_pos = kwargs.get("init_gripper_pos", 0.05)
         self.default_init_wait_time = kwargs.get("init_wait_time", 0.50)
         self.parallel_reset = bool(kwargs.get("parallel_reset", False))
-        self.passive = False
+        self.passive = True
 
         self._setup_meta_keys()
         self._setup_spaces()

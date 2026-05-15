@@ -16,6 +16,13 @@ from omegaconf import DictConfig, OmegaConf
 from agent_factory.runner.hitl_runner import HITLRunner
 
 
+DEPLOY_START_KEY = "s"
+DEPLOY_STOP_KEY = "e"
+DEPLOY_CONTINUE_KEY = "c"
+DEPLOY_INIT_KEY = "i"
+DEPLOY_QUIT_KEY = "q"
+
+
 class HITLDeployRunner(HITLRunner):
     """
     Deployment-oriented HITL runner.
@@ -28,15 +35,22 @@ class HITLDeployRunner(HITLRunner):
     """
 
     def __init__(self, cfg: DictConfig, agent: Any, env: Any):
-        self.save_key: str = str(getattr(cfg.runner, "deploy_save_key", "s")).lower()
-        self.continue_key: str = str(getattr(cfg.runner, "deploy_continue_key", "c")).lower()
+        self.start_key: str = str(DEPLOY_START_KEY).lower()
+        self.stop_key: str = str(DEPLOY_STOP_KEY).lower()
+        self.continue_key: str = str(DEPLOY_CONTINUE_KEY).lower()
+        self.init_key: str = str(DEPLOY_INIT_KEY).lower()
+        self.quit_key: str = str(DEPLOY_QUIT_KEY).lower()
         self.risk_check_hz: float = float(getattr(cfg.runner, "risk_check_hz", 0.0))
         self.risk_use_safe_action: bool = bool(
             getattr(cfg.runner, "risk_use_safe_action", True)
         )
         self._key_lock = threading.Lock()
-        self._save_requested = False
+        self._init_requested = False
+        self._start_requested = False
+        self._stop_requested = False
         self._continue_requested = False
+        self._quit_requested = False
+        self.quit_requested = False
         self._prompt_active = False
 
         self._risk_queue: "queue.Queue[Dict[str, Any]]" = queue.Queue(maxsize=1)
@@ -68,10 +82,17 @@ class HITLDeployRunner(HITLRunner):
                 return
 
             with self._key_lock:
-                if char == self.save_key:
-                    self._save_requested = True
+                if char == self.init_key:
+                    self._init_requested = True
+                elif char == self.start_key:
+                    self._start_requested = True
+                elif char == self.stop_key:
+                    self._stop_requested = True
                 elif char == self.continue_key:
                     self._continue_requested = True
+                elif char == self.quit_key:
+                    self._quit_requested = True
+                    self.quit_requested = True
 
         self._listener = keyboard.Listener(on_press=_on_press)
         self._listener.start()
@@ -81,16 +102,36 @@ class HITLDeployRunner(HITLRunner):
         # toggle to avoid conflicting override sources.
         return False
 
-    def _consume_save_requested(self) -> bool:
+    def _consume_init_requested(self) -> bool:
         with self._key_lock:
-            value = self._save_requested
-            self._save_requested = False
+            value = self._init_requested
+            self._init_requested = False
+            return value
+
+    def _consume_start_requested(self) -> bool:
+        with self._key_lock:
+            value = self._start_requested
+            self._start_requested = False
+            return value
+
+    def _consume_stop_requested(self) -> bool:
+        with self._key_lock:
+            value = self._stop_requested
+            self._stop_requested = False
             return value
 
     def _consume_continue_requested(self) -> bool:
         with self._key_lock:
             value = self._continue_requested
             self._continue_requested = False
+            return value
+
+    def _consume_quit_requested(self) -> bool:
+        with self._key_lock:
+            value = self._quit_requested
+            self._quit_requested = False
+            if value:
+                self.quit_requested = True
             return value
 
     def _risk_worker(self) -> None:
@@ -193,6 +234,28 @@ class HITLDeployRunner(HITLRunner):
         next_obs, _, _, _, _ = self.env.step(action)
         return next_obs
 
+    def _reset_for_deploy_init(self) -> Dict[str, Any]:
+        print("[HITLDeployRunner] 执行初始化复位并同步主从臂...")
+        obs, _ = self.env.reset(options={"sync_master": True})
+        self._env_override_active = False
+        self._clear_action_queue()
+        while not self.obs_queue.empty():
+            try:
+                self.obs_queue.get_nowait()
+            except queue.Empty:
+                break
+        while not self._risk_queue.empty():
+            try:
+                self._risk_queue.get_nowait()
+            except queue.Empty:
+                break
+        while not self._risk_result_queue.empty():
+            try:
+                self._risk_result_queue.get_nowait()
+            except queue.Empty:
+                break
+        return obs
+
     def _reset_session_buffers(self) -> None:
         self.current_traj = {
             "obs": [],
@@ -263,24 +326,32 @@ class HITLDeployRunner(HITLRunner):
         self._last_closed_action_idx = idx
         return True
 
-    def _prompt_binary_success(self) -> bool:
+    def _prompt_save_outcome(self) -> str:
         self._prompt_active = True
         try:
             while True:
                 try:
                     choice = input(
-                        "[Save] 将本次 rollout 记为成功还是失败？输入 s 成功 / f 失败: "
+                        "[Save] 请选择本次 rollout 处理方式：1 成功 / 2 失败 / d 删除: "
                     ).strip().lower()
                 except (EOFError, KeyboardInterrupt):
-                    print("\n[Save] 未确认成功标签，默认记为失败。")
-                    return False
-                if choice in {"s", "success", "y", "yes"}:
-                    return True
-                if choice in {"f", "fail", "failure", "n", "no"}:
-                    return False
-                print("[Save] 无效输入，请输入 s 或 f。")
+                    print("\n[Save] 未确认处理方式，默认删除本次 rollout。")
+                    return "delete"
+                if choice in {"1", "s", "success", "y", "yes"}:
+                    return "success"
+                if choice in {"2", "f", "fail", "failure", "n", "no"}:
+                    return "failure"
+                if choice in {"d", "delete", "discard"}:
+                    return "delete"
+                print("[Save] 无效输入，请输入 1 / 2 / d。")
         finally:
             self._prompt_active = False
+
+    def _prompt_binary_success(self) -> Optional[bool]:
+        outcome = self._prompt_save_outcome()
+        if outcome == "delete":
+            return None
+        return outcome == "success"
 
     def _prompt_max_step_choice(self) -> str:
         self._prompt_active = True
@@ -522,10 +593,10 @@ class HITLDeployRunner(HITLRunner):
             f"(Hz: {self.control_hz}, RiskHz: {self.risk_check_hz}, "
             f"RiskMode: {'safe_hold' if self.risk_use_safe_action else 'pause_no_step'})..."
         )
-        obs, _ = self.env.reset()
         self._env_override_active = False
         self._risk_last_submit_time = 0.0
         self._risk_last_handled_token = -1
+        self.quit_requested = False
         self._reset_session_buffers()
 
         step_count = 0
@@ -553,10 +624,44 @@ class HITLDeployRunner(HITLRunner):
                 self._risk_result_queue.get_nowait()
             except queue.Empty:
                 break
+
+        with self._key_lock:
+            self._init_requested = False
+            self._start_requested = False
+            self._stop_requested = False
+            self._quit_requested = False
+
+        print(
+            f"[HITLDeployRunner] 空闲待命：按 {self.init_key} 初始化，"
+            f"按 {self.start_key} 从当前状态开始录制，"
+            f"录制中按 {self.stop_key} 结束，"
+            f"按 {self.quit_key} 退出。"
+        )
+        obs: Dict[str, Any] = self._refresh_obs_with_safe_step({})
+        while not self.episode_done:
+            if self._consume_quit_requested():
+                self._disable_teleop()
+                print("[HITLDeployRunner] 收到退出指令，结束部署循环。")
+                self.episode_done = True
+                return
+            if self._consume_init_requested():
+                obs = self._reset_for_deploy_init()
+                continue
+            if self._consume_start_requested():
+                print("[HITLDeployRunner] 开始录制当前 rollout。")
+                break
+            obs = self._refresh_obs_with_safe_step(obs)
+
         self._queue_latest_obs_for_inference(obs)
 
         while not self.episode_done:
-            save_requested = self._consume_save_requested()
+            if self._consume_quit_requested():
+                self._disable_teleop()
+                print("[HITLDeployRunner] 收到退出指令，当前 rollout 不保存。")
+                self.episode_done = True
+                break
+
+            stop_requested = self._consume_stop_requested()
             continue_requested = self._consume_continue_requested()
 
             env_override_requested = self._read_env_override_requested()
@@ -596,9 +701,13 @@ class HITLDeployRunner(HITLRunner):
                     risk_triggered = True
                     print("[HITLDeployRunner] 风险指标触发，等待专家接管或继续指令。")
 
-            if save_requested:
+            if stop_requested:
                 self._disable_teleop()
                 final_success = self._prompt_binary_success()
+                if final_success is None:
+                    print("[HITLDeployRunner] 已删除当前 rollout，不保存。")
+                    self.episode_done = True
+                    break
                 self._mark_last_boundary(
                     "manual_save",
                     terminated=True,
@@ -695,6 +804,10 @@ class HITLDeployRunner(HITLRunner):
                     choice = self._prompt_max_step_choice()
                     if choice == "save":
                         final_success = self._prompt_binary_success()
+                        if final_success is None:
+                            print("[HITLDeployRunner] 已删除当前 rollout，不保存。")
+                            self.episode_done = True
+                            break
                         self._mark_last_boundary(
                             "max_step_save",
                             terminated=True,

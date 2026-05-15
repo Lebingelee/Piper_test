@@ -11,6 +11,12 @@ from agent_factory.agents.registry import make_agent
 from agent_factory.config.manager import ConfigManager
 from agent_factory.env.env_factories import create_env
 from agent_factory.runner import HITLDeployRunner
+from agent_factory.runner.hitl_runner_deploy import (
+    DEPLOY_INIT_KEY,
+    DEPLOY_QUIT_KEY,
+    DEPLOY_START_KEY,
+    DEPLOY_STOP_KEY,
+)
 from agent_factory.runner.checkpoint_utils import ensure_action_normalizer_ready
 
 
@@ -18,7 +24,7 @@ DEFAULT_CONFIG_PATH = "run_results/piper_dual_merged_cpiql_dac/model_config.yaml
 DEFAULT_CHECKPOINT_PATH = (
     "run_results/piper_dual_merged_cpiql_dac/actor_step_60000.pth"
 )
-DEFAULT_SAVE_DIR = "data/piper_dual_merged_cpiql_dac_hitl_deploy_runner"
+DEFAULT_SAVE_DIR = "data/merged_cpiql_dac_hitl_deploy_runner"
 
 
 def _start_cameras_if_available(env, warmup: float):
@@ -52,7 +58,12 @@ def parse_args():
     parser.add_argument("--skip-load", action="store_true")
     parser.add_argument("--device", default="")
     parser.add_argument("--save-dir", default=DEFAULT_SAVE_DIR)
-    parser.add_argument("--max-steps", type=int, default=600)
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=None,
+        help="Override cfg.env.max_episode_steps; omit to use config.yaml.",
+    )
     parser.add_argument("--control-hz", type=int, default=0)
     parser.add_argument("--risk-check-hz", type=float, default=0.0)
     parser.add_argument(
@@ -60,8 +71,8 @@ def parse_args():
         action="store_true",
         help="Pause env.step() after risk trigger instead of filling with safe_action.",
     )
-    parser.add_argument("--save-key", default="s")
-    parser.add_argument("--continue-key", default="c")
+    parser.add_argument("--episodes", type=int, default=0, help="Number of rollouts to collect; 0 means until Ctrl-C.")
+    parser.add_argument("--sleep-between", type=float, default=1.0)
     parser.add_argument("--camera-warmup", type=float, default=1.0)
     return parser.parse_args()
 
@@ -81,15 +92,14 @@ def main():
     cfg.train.device = device
     cfg.env.server_mode = False
     cfg.runner.hitl_enabled = True
-    cfg.env.max_episode_steps = int(args.max_steps)
+    if args.max_steps is not None:
+        cfg.env.max_episode_steps = int(args.max_steps)
     if args.control_hz > 0:
         cfg.runner.control_hz = int(args.control_hz)
     if args.save_dir:
         cfg.runner.save_dir = args.save_dir
     cfg.runner.risk_check_hz = float(args.risk_check_hz)
     cfg.runner.risk_use_safe_action = not bool(args.risk_no_safe_action_gap)
-    cfg.runner.deploy_save_key = str(args.save_key)
-    cfg.runner.deploy_continue_key = str(args.continue_key)
     os.makedirs(cfg.runner.save_dir, exist_ok=True)
 
     if not args.skip_load:
@@ -127,7 +137,23 @@ def main():
         f"session files will be saved to {cfg.runner.save_dir}"
     )
     try:
-        runner.run()
+        episode_idx = 0
+        while args.episodes <= 0 or episode_idx < args.episodes:
+            episode_idx += 1
+            total_msg = "∞" if args.episodes <= 0 else str(args.episodes)
+            print(
+                f"[Test-HITL-Deploy] Rollout {episode_idx}/{total_msg}. "
+                f"Press '{DEPLOY_INIT_KEY}' to init, "
+                f"'{DEPLOY_START_KEY}' to start, "
+                f"'{DEPLOY_STOP_KEY}' to stop, "
+                f"'{DEPLOY_QUIT_KEY}' to quit."
+            )
+            runner.run()
+            if getattr(runner, "quit_requested", False):
+                print("[Test-HITL-Deploy] Quit requested. Exiting collection loop...")
+                break
+            if args.sleep_between > 0:
+                time.sleep(args.sleep_between)
     except KeyboardInterrupt:
         print("[Test-HITL-Deploy] KeyboardInterrupt! Stopping runner...")
     finally:
