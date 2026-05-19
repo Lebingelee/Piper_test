@@ -26,11 +26,11 @@ train:
   num_workers: 0
   save_interval: 100
   train_object: critic_then_actor
-  dataset_mode: expert_dataset
   dataset_key: expert_dataset
   critic_iters: 1
   actor_iters: 1
-  critic_ckpt_path: ''
+  ckpt_path: ''
+  finetune: false
   save_root: run_results
   exp_name: piper_dual_merged_cpiql_dac
 

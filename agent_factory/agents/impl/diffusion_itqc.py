@@ -52,10 +52,7 @@ class DiffusionITQCAgent(MainMixin,ConditionalDiffusionActorMixin, ITQCCriticMix
         import os
         import gc
         self.train()
-        if 'RL' in save_dir:
-            run_save_interval = self.cfg.agent_sp.online_iters_actor
-        else:
-            run_save_interval = self.cfg.agent_sp.offline_iters_actor / 4
+        run_save_interval = num_steps / 4
         
         desc = f"Train {mode.upper()}"
         pbar = tqdm(range(num_steps), desc=desc, leave=False)
@@ -114,11 +111,34 @@ class DiffusionITQCAgent(MainMixin,ConditionalDiffusionActorMixin, ITQCCriticMix
         additional_args = additional_args or {}
         cfg = self.cfg
         cfg_sp = self.cfg.agent_sp
+        cfg_train = cfg.train
 
         expert_dataset = dataset['offline']
         replay_buffer = dataset.get('online', None)
-        phase = additional_args.get("phase", "offline")
-        checkpoint_dir = f"{cfg_sp.save_dir}/{cfg_sp.exp_name}"
+        phase = additional_args.get("phase", None)
+        checkpoint_dir = f"{cfg_train.save_root}/{cfg_train.exp_name}"
+
+        if phase is None:
+            dataset_key = str(getattr(cfg.train, "dataset_key", "expert_dataset") or "expert_dataset")
+            wants_online = bool(getattr(cfg.train, "finetune", False)) and dataset_key in {
+                "replaybuffer",
+                "expert_dataset+replaybuffer",
+            }
+            phase = "online" if wants_online and replay_buffer is not None else "offline"
+        phase = str(phase).strip().lower()
+        if phase not in {"offline", "online"}:
+            raise ValueError(f"Unsupported ITQC phase: {phase}")
+        if phase == "online" and replay_buffer is None:
+            raise ValueError("ITQC online phase requires replay_buffer, but dataset bundle does not provide one.")
+
+        ckpt_path = str(additional_args.get("ckpt_path", getattr(cfg.train, "ckpt_path", "")) or "").strip()
+        if ckpt_path:
+            if not os.path.exists(ckpt_path):
+                raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
+            self.load(ckpt_path)
+            print(f">>> Loaded ITQC checkpoint from {ckpt_path}")
+
+        print(f">>> ITQC training phase: {phase}")
 
         # 统一拟合动作归一化器（ConditionalDiffusionActorMixin）
         self._fit_action_normalizer_from_dataset(dataset)
@@ -185,7 +205,10 @@ class DiffusionITQCAgent(MainMixin,ConditionalDiffusionActorMixin, ITQCCriticMix
             del loader
             gc.collect()
 
+            self.save(f"{checkpoint_dir}/critic_only_ckpt.pth", meta={"phase": "critic_trained"})
+            replay_buffer.switch('all')
             print(">>> Relabeling Online Data...")
+
             self.relabel_data(replay_buffer, phase="finetune")
 
             print(">>> Training Policy (Online)...")

@@ -168,14 +168,13 @@ class TrainConfig:
     device: str = "cuda"
     batch_size: int = 32
     num_workers: int = 0
-    n_epochs: int = 1000
     save_interval: int = 5000
     train_object: str = "critic_then_actor"
-    dataset_mode: str = "expert_dataset"
     dataset_key: str = "expert_dataset"
     critic_iters: int = 200
     actor_iters: int = 200
-    critic_ckpt_path: str = ""
+    ckpt_path: str = ""
+    finetune: bool = False
     save_root: str = "run_results"
     exp_name: str = ""
 

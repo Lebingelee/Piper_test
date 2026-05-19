@@ -27,6 +27,7 @@ class CPIQLFileReplayBuffer(CPIQLTrajectoryDataset):
     def __init__(
         self,
         cfg,
+        h5_path: Optional[str] = None,
         folder_path: Optional[str] = None,
         required_keys: Optional[Sequence[str]] = None,
     ):
@@ -38,13 +39,14 @@ class CPIQLFileReplayBuffer(CPIQLTrajectoryDataset):
             or cfg_get(cfg, "dataset.replay.replaybuffer_path", None)
             or cfg_get(cfg, "runner.save_dir", None)
         )
-        if replay_path is None:
+        if h5_path is None and replay_path is None:
             raise ValueError(
-                "CPIQLFileReplayBuffer requires folder_path or cfg.dataset.replaybuffer.folder_path."
+                "CPIQLFileReplayBuffer requires h5_path/folder_path or cfg.dataset.replaybuffer.folder_path."
             )
         super().__init__(
             cfg=cfg,
-            folder_path=replay_path,
+            h5_path=h5_path,
+            folder_path=None if h5_path else replay_path,
             num_traj=cfg_get(cfg, "dataset.replaybuffer.num_traj", cfg_get(cfg, "dataset.replay.num_traj", None)),
             required_keys=required_keys,
             require_intervention=True,

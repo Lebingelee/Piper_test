@@ -2,11 +2,18 @@ import argparse
 import copy
 import json
 import os
+import sys
 from typing import Any, Dict, Optional, Tuple
 
 import h5py
 import numpy as np
 from omegaconf import OmegaConf
+
+if __package__ in {None, ""}:
+    _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+    _REPO_ROOT = os.path.dirname(os.path.dirname(_SCRIPT_DIR))
+    if _REPO_ROOT not in sys.path:
+        sys.path.insert(0, _REPO_ROOT)
 
 from agent_factory.agents.registry import get_default_config, make_agent
 from agent_factory.data.registry import build_training_bundle, infer_dataset_type_from_agent_type
@@ -15,7 +22,6 @@ from agent_factory.data.registry import build_training_bundle, infer_dataset_typ
 TRAIN_CLI_KEYS = {
     "device",
     "train_object",
-    "dataset_mode",
     "dataset_key",
     "critic_iters",
     "actor_iters",
@@ -24,8 +30,20 @@ TRAIN_CLI_KEYS = {
     "save_interval",
     "save_root",
     "exp_name",
-    "critic_ckpt_path",
+    "ckpt_path",
+    "finetune",
 }
+
+DEFAULT_FINETUNE_CONFIG_PATH = os.path.join(
+    "run_results",
+    "piper_dual_merged_cpiql_dac",
+    "finetune_config.yaml",
+)
+DEFAULT_MODEL_CONFIG_PATH = os.path.join(
+    "run_results",
+    "piper_dual_merged_cpiql_dac",
+    "model_config.yaml",
+)
 
 
 def _read_json_dataset(dataset) -> Dict[str, Any]:
@@ -81,12 +99,26 @@ def _normalize_user_config(raw_cfg: Dict[str, Any]) -> Dict[str, Any]:
     expert_cfg = _ensure_dict(dataset_cfg, "expert")
     replaybuffer_cfg = _ensure_dict(dataset_cfg, "replaybuffer")
 
+    if "critic_ckpt_path" in train_cfg and "ckpt_path" not in train_cfg:
+        train_cfg["ckpt_path"] = train_cfg["critic_ckpt_path"]
+    train_cfg.pop("critic_ckpt_path", None)
+    train_cfg.pop("n_epochs", None)
+    legacy_dataset_mode = train_cfg.pop("dataset_mode", None)
+    if legacy_dataset_mode and "dataset_key" not in train_cfg:
+        dataset_mode_to_key = {
+            "expert_dataset": "expert_dataset",
+            "replaybuffer": "replaybuffer",
+            "expert_plus_replaybuffer": "expert_dataset+replaybuffer",
+        }
+        train_cfg["dataset_key"] = dataset_mode_to_key.get(str(legacy_dataset_mode), str(legacy_dataset_mode))
+
     legacy_pipeline = _as_dict(raw_cfg.get("pipeline"))
     for key, value in legacy_pipeline.items():
         train_cfg.setdefault(key, value)
 
     for key in TRAIN_CLI_KEYS:
         _move_if_present(model_cfg, key, train_cfg, key)
+    _move_if_present(model_cfg, "critic_ckpt_path", train_cfg, "ckpt_path")
 
     _move_if_present(model_cfg, "device", train_cfg, "device")
     _move_if_present(model_cfg, "dataset_type", dataset_cfg, "dataset_type")
@@ -122,6 +154,8 @@ def _normalize_user_config(raw_cfg: Dict[str, Any]) -> Dict[str, Any]:
         "expert_dataset_path",
         "expert_num_traj",
         "expert_format",
+        "critic_ckpt_path",
+        "n_epochs",
         "replaybuffer_path",
         "replay_max_traj_num",
         "include_rgb",
@@ -217,9 +251,78 @@ def _apply_train_cli_overrides(cfg: Any, overrides: Optional[Dict[str, Any]]) ->
     return cfg
 
 
+def _path_exists(path: str) -> bool:
+    return bool(path) and os.path.exists(path)
+
+
+def _candidate_config_paths_from_checkpoint(ckpt_path: Optional[str]) -> Tuple[str, ...]:
+    if not ckpt_path:
+        return ()
+    checkpoint_dir = os.path.dirname(os.path.abspath(ckpt_path))
+    parent_dir = os.path.dirname(checkpoint_dir)
+    candidates = []
+    for base_dir in (checkpoint_dir, parent_dir):
+        for filename in ("finetune_config.yaml", "model_config.yaml"):
+            candidate = os.path.join(base_dir, filename)
+            if candidate not in candidates:
+                candidates.append(candidate)
+    return tuple(candidates)
+
+
+def resolve_config_path(
+    config_path: Optional[str],
+    finetune: bool = False,
+    ckpt_path: Optional[str] = None,
+) -> Optional[str]:
+    if config_path:
+        return config_path
+    if not finetune:
+        return None
+
+    for candidate in _candidate_config_paths_from_checkpoint(ckpt_path):
+        if _path_exists(candidate):
+            return candidate
+    for candidate in (DEFAULT_FINETUNE_CONFIG_PATH, DEFAULT_MODEL_CONFIG_PATH):
+        if _path_exists(candidate):
+            return candidate
+    raise ValueError(
+        "Finetune mode requires a base config. Pass --config explicitly, or place "
+        f"`finetune_config.yaml` / `model_config.yaml` under the checkpoint directory or `{os.path.dirname(DEFAULT_MODEL_CONFIG_PATH)}`."
+    )
+
+
+def _apply_finetune_defaults(
+    cfg: Any,
+    user_cfg: Dict[str, Any],
+    cli_overrides: Optional[Dict[str, Any]] = None,
+) -> Any:
+    cli_overrides = cli_overrides or {}
+    cfg.train.finetune = True
+
+    if not _has_path(user_cfg, "train", "dataset_key") and cli_overrides.get("dataset_key") is None:
+        cfg.train.dataset_key = "expert_dataset+replaybuffer"
+    if not _has_path(user_cfg, "train", "exp_name") and cli_overrides.get("exp_name") is None:
+        base_exp_name = str(getattr(cfg.train, "exp_name", "") or "piper_dual_merged_cpiql_dac")
+        if not base_exp_name.endswith("_finetune"):
+            cfg.train.exp_name = f"{base_exp_name}_finetune"
+
+    _sync_derived_fields(cfg)
+    return cfg
+
+
+def _resolve_finetune_from_config(config_path: Optional[str]) -> Optional[bool]:
+    raw_cfg = _load_raw_config(config_path)
+    user_cfg = _normalize_user_config(raw_cfg)
+    train_cfg = user_cfg.get("train", {}) if isinstance(user_cfg, dict) else {}
+    if not isinstance(train_cfg, dict) or "finetune" not in train_cfg:
+        return None
+    return bool(train_cfg.get("finetune"))
+
+
 def load_training_config(
     config_path: Optional[str] = None,
     cli_overrides: Optional[Dict[str, Any]] = None,
+    finetune: Optional[bool] = None,
 ) -> Tuple[Any, Dict[str, Any]]:
     raw_cfg = _load_raw_config(config_path)
     user_cfg = _normalize_user_config(raw_cfg)
@@ -229,6 +332,9 @@ def load_training_config(
     cfg = OmegaConf.merge(default_cfg, OmegaConf.create(user_cfg))
     _fill_inferred_env_stats(cfg, user_cfg)
     _sync_derived_fields(cfg)
+    effective_finetune = bool(getattr(cfg.train, "finetune", False)) if finetune is None else bool(finetune)
+    if effective_finetune:
+        cfg = _apply_finetune_defaults(cfg, user_cfg, cli_overrides=cli_overrides)
     cfg = _apply_train_cli_overrides(cfg, cli_overrides)
 
     runtime_spec = {
@@ -249,12 +355,21 @@ def _save_model_config_snapshot(cfg: Any, save_dir: str, filename: str = "model_
     OmegaConf.save(OmegaConf.create(snapshot), os.path.join(save_dir, filename), resolve=True)
 
 
+def get_snapshot_config_filename(cfg: Any) -> str:
+    return "finetune_config.yaml" if bool(getattr(cfg.train, "finetune", False)) else "model_config.yaml"
+
+
 def train_universal(
     config_path: Optional[str] = None,
     overrides: Optional[Dict[str, Any]] = None,
     dry_run: bool = False,
+    finetune: Optional[bool] = None,
 ) -> Dict[str, Any]:
-    cfg, runtime_spec = load_training_config(config_path=config_path, cli_overrides=overrides)
+    cfg, runtime_spec = load_training_config(
+        config_path=config_path,
+        cli_overrides=overrides,
+        finetune=finetune,
+    )
 
     save_root = str(cfg.train.save_root)
     exp_name = str(cfg.train.exp_name or "piper_dual_merged_cpiql_dac")
@@ -265,9 +380,10 @@ def train_universal(
     os.makedirs(critic_dir, exist_ok=True)
     os.makedirs(actor_dir, exist_ok=True)
 
-    _save_model_config_snapshot(cfg, run_root, filename="model_config.yaml")
-    _save_model_config_snapshot(cfg, critic_dir, filename="model_config.yaml")
-    _save_model_config_snapshot(cfg, actor_dir, filename="model_config.yaml")
+    snapshot_filename = get_snapshot_config_filename(cfg)
+    _save_model_config_snapshot(cfg, run_root, filename=snapshot_filename)
+    _save_model_config_snapshot(cfg, critic_dir, filename=snapshot_filename)
+    _save_model_config_snapshot(cfg, actor_dir, filename=snapshot_filename)
 
     if dry_run:
         return {
@@ -276,6 +392,7 @@ def train_universal(
             "run_root": run_root,
             "critic_dir": critic_dir,
             "actor_dir": actor_dir,
+            "snapshot_filename": snapshot_filename,
         }
 
     agent = make_agent(runtime_spec["agent_type"], cfg)
@@ -290,31 +407,43 @@ def train_universal(
         "run_root": run_root,
         "critic_dir": critic_dir,
         "actor_dir": actor_dir,
+        "snapshot_filename": snapshot_filename,
     }
 
 
 def main():
     parser = argparse.ArgumentParser(description="Universal training entrypoint.")
     parser.add_argument("--config", type=str, default=None, help="Path to a detailed model_config.yaml.")
+    finetune_group = parser.add_mutually_exclusive_group()
+    finetune_group.add_argument("--finetune", "--fintune", action="store_true", dest="finetune")
+    finetune_group.add_argument("--no-finetune", action="store_false", dest="finetune")
+    parser.set_defaults(finetune=None)
     parser.add_argument("--device", type=str, default=None)
-    parser.add_argument("--train-object", type=str, default=None, choices=["critic", "actor", "critic_then_actor"], help="Which object to train.")
-    parser.add_argument("--dataset-mode", type=str, default=None, choices=["expert_dataset", "expert_plus_replaybuffer", "replaybuffer"], help="Which dataset bundle to use.")
-    parser.add_argument("--dataset-key", type=str, default=None, help="Which key to select from the dataset bundle.")
-    parser.add_argument("--critic-iters", type=int, default=None)
-    parser.add_argument("--actor-iters", type=int, default=None)
-    parser.add_argument("--batch-size", type=int, default=None)
-    parser.add_argument("--num-workers", type=int, default=None)
-    parser.add_argument("--save-interval", type=int, default=None)
-    parser.add_argument("--save-root", type=str, default=None)
-    parser.add_argument("--exp-name", type=str, default=None)
-    parser.add_argument("--critic-ckpt-path", type=str, default=None)
+    parser.add_argument("--train-object", "--train_object", type=str, default=None, choices=["critic", "actor", "critic_then_actor"], help="Which object to train.")
+    parser.add_argument("--dataset-key", "--dataset_key", type=str, default=None, choices=["expert_dataset", "replaybuffer", "expert_dataset+replaybuffer"], help="Which dataset view to train on.")
+    parser.add_argument("--critic-iters", "--critic_iters", type=int, default=None)
+    parser.add_argument("--actor-iters", "--actor_iters", type=int, default=None)
+    parser.add_argument("--batch-size", "--batch_size", type=int, default=None)
+    parser.add_argument("--num-workers", "--num_workers", type=int, default=None)
+    parser.add_argument("--save-interval", "--save_interval", type=int, default=None)
+    parser.add_argument("--save-root", "--save_root", type=str, default=None)
+    parser.add_argument("--exp-name", "--exp_name", type=str, default=None)
+    parser.add_argument("--ckpt-path", "--ckpt_path", type=str, default=None)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
+
+    config_finetune = _resolve_finetune_from_config(args.config) if args.config else None
+    effective_finetune = config_finetune if args.finetune is None else bool(args.finetune)
+
+    config_path = resolve_config_path(
+        config_path=args.config,
+        finetune=bool(effective_finetune),
+        ckpt_path=args.ckpt_path,
+    )
 
     overrides = {
         "device": args.device,
         "train_object": args.train_object,
-        "dataset_mode": args.dataset_mode,
         "dataset_key": args.dataset_key,
         "critic_iters": args.critic_iters,
         "actor_iters": args.actor_iters,
@@ -323,11 +452,18 @@ def main():
         "save_interval": args.save_interval,
         "save_root": args.save_root,
         "exp_name": args.exp_name,
-        "critic_ckpt_path": args.critic_ckpt_path,
+        "ckpt_path": args.ckpt_path,
     }
-    result = train_universal(config_path=args.config, overrides=overrides, dry_run=args.dry_run)
+    if args.finetune is not None:
+        overrides["finetune"] = bool(args.finetune)
+    result = train_universal(
+        config_path=config_path,
+        overrides=overrides,
+        dry_run=args.dry_run,
+        finetune=effective_finetune,
+    )
     if args.dry_run:
-        print(f"[DryRun] Saved config snapshot to {result['run_root']}")
+        print(f"[DryRun] Saved config snapshot to {os.path.join(result['run_root'], result['snapshot_filename'])}")
 
 
 if __name__ == "__main__":

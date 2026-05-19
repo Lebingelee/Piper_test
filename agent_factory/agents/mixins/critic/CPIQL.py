@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Sequence
 import torch
 import torch.nn.functional as F
 
+from agent_factory.agents.mixins.critic.base_eval import CriticEvalMixinBase
 from agent_factory.config.structure import StateEncoderConfig
 from agent_factory.modules.critics.cpiql_critic import CPIQLQNet, CPIQLVNet
 from agent_factory.modules.encoders.state_encoder import BaseStateEncoder
@@ -40,7 +41,7 @@ class CPIQLCriticConfig:
     log_interval: int = 100
 
 
-class CPIQLCriticMixin:
+class CPIQLCriticMixin(CriticEvalMixinBase):
     """
     Failure-Conditioned Progress IQL critic.
 
@@ -396,6 +397,7 @@ class CPIQLCriticMixin:
             if (step_idx + 1) % log_interval == 0:
                 shown = {
                     "q": running.get("loss_q", 0.0) / log_interval,
+                    "vp": running.get("loss_v_progress", 0.0) / log_interval,
                     "v": running.get("loss_v", 0.0) / log_interval,
                     "gap": running.get("critic_gap_mean", 0.0) / log_interval,
                 }
@@ -484,3 +486,39 @@ class CPIQLCriticMixin:
         q = self.predict_q(obs, action, k, preprocessed=True)
         v = self.predict_v(obs, k, preprocessed=True)
         return q - v
+
+    @torch.no_grad()
+    def eval_batch(
+        self,
+        batch: Dict[str, Any],
+        only_obs: bool = True,
+    ) -> Dict[str, torch.Tensor]:
+        if "observations" not in batch:
+            raise KeyError("CPIQL eval_batch requires 'observations' in batch.")
+        if "action" not in batch:
+            raise KeyError("CPIQL eval_batch requires 'action' in batch.")
+
+        obs = self._preprocess_obs(batch["observations"])
+        action = batch["action"].to(self.device).float()
+
+        results: Dict[str, torch.Tensor] = {}
+        if "frame" in batch:
+            results["frame"] = batch["frame"].reshape(-1).detach().cpu().long()
+
+        v_k0 = self.predict_v(obs, 0.0, preprocessed=True).reshape(-1).detach().cpu()
+        v_k1 = self.predict_v(obs, 1.0, preprocessed=True).reshape(-1).detach().cpu()
+        gap = (v_k1 - v_k0).detach().cpu()
+
+        results["figure:value/V(k=0)"] = v_k0
+        results["figure:value/V(k=1)"] = v_k1
+        results["figure:value/critic_gap"] = gap
+
+        if not only_obs:
+            q_k0 = self.predict_q(obs, action, 0.0, preprocessed=True).reshape(-1).detach().cpu()
+            q_k1 = self.predict_q(obs, action, 1.0, preprocessed=True).reshape(-1).detach().cpu()
+            adv_k0 = self.compute_advantage(obs, action, 0.0, preprocessed=True).reshape(-1).detach().cpu()
+            results["figure:action_value/Q(k=0)"] = q_k0
+            results["figure:action_value/Q(k=1)"] = q_k1
+            results["figure:action_value/adv(k=0)"] = adv_k0
+
+        return results
