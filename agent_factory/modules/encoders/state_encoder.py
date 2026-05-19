@@ -25,7 +25,7 @@ class BaseStateEncoder(nn.Module):
         proprio_dim: int,
         out_dim: int = 256,
         hidden_dims: list = [256],
-        visual_feature_dim: int = 256, # VisualEncoder 的输出维度
+        visual_feature_dim: Optional[int] = None, # VisualEncoder 的输出维度；缺省时自动从 visual_encoder.out_dim 推断
         num_cameras: int = 1,
         view_fusion: str = 'concat' # 'concat' or 'mean'
     ):
@@ -39,6 +39,10 @@ class BaseStateEncoder(nn.Module):
         self.fusion_input_dim = 0
         
         if self.visual_encoder is not None:
+            if visual_feature_dim is None:
+                visual_feature_dim = getattr(self.visual_encoder, "out_dim", None)
+            if visual_feature_dim is None:
+                raise ValueError("BaseStateEncoder requires visual_feature_dim when visual_encoder.out_dim is unavailable.")
             self.fusion_input_dim += visual_feature_dim*num_cameras if view_fusion == 'concat' else visual_feature_dim
             
         if self.proprio_dim > 0:

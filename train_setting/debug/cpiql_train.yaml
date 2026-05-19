@@ -27,17 +27,17 @@ env:
   reward_shape: false
 train:
   device: cuda:0
-  batch_size: 24
+  batch_size: 20
   num_workers: 20
   save_interval: 15000
   train_object: critic
   dataset_key: expert_dataset+replaybuffer
   critic_iters: 8000
   actor_iters: 20000
-  ckpt_path: run_results/piper_dual_merged_cpiql_dac/actor_final.pth
-  finetune: true
+  ckpt_path: ''
+  finetune: false
   save_root: train_setting/debug
-  exp_name: finetune_test
+  exp_name: train_test
 dataset:
   dataset_type: cpiql
   include_rgb: true

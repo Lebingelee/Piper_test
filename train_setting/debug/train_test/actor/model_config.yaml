@@ -27,17 +27,17 @@ env:
   reward_shape: false
 train:
   device: cuda:0
-  batch_size: 24
+  batch_size: 20
   num_workers: 20
   save_interval: 15000
   train_object: critic
   dataset_key: expert_dataset+replaybuffer
   critic_iters: 8000
   actor_iters: 20000
-  ckpt_path: run_results/piper_dual_merged_cpiql_dac/actor_final.pth
-  finetune: true
+  ckpt_path: ''
+  finetune: false
   save_root: train_setting/debug
-  exp_name: finetune_test
+  exp_name: train_test
 dataset:
   dataset_type: cpiql
   include_rgb: true
@@ -130,16 +130,16 @@ critic:
   encoder:
     visual:
       in_channels: 3
-      out_dim: 256
+      out_dim: 512
       backbone_type: resnet
       pool_feature_map: true
       use_group_norm: true
     proprio_dim: 38
-    out_dim: 256
+    out_dim: 512
     view_fusion: concat
   hidden_dims:
-  - 256
-  - 256
+  - 512
+  - 512
   q_lr: 0.0003
   v_lr: 0.0003
   expectile: 0.7
@@ -148,18 +148,13 @@ critic:
   - 32
   k_grid:
   - 0.0
-  - 0.2
-  - 0.4
+  - 0.3
   - 0.6
-  - 0.8
   - 1.0
-  - 0.0
-  - 0.2
-  - 0.4
-  gamma_floor: 0.0001
-  alpha_progress: 1.0
-  lambda_mono: 0.05
-  lambda_smooth: 0.01
+  gamma_floor: 0.1
+  alpha_progress: 0.1
+  lambda_mono: 0.0
+  lambda_smooth: 0.0
   intervention_terminal_reward: 0.2
   intervention_value_scale: 0.6
   intervention_reward_min: 0.05
@@ -167,7 +162,10 @@ critic:
   intervention_reward_refresh_interval: 0
   intervention_progress_weight: 0.3
   success_progress_weight: 1.0
+  failure_progress_weight: 1.0
   anchor_intervention_pseudo: false
+  use_per_k_backward: true
+  num_k_samples: 1
   grad_clip_norm: 0.0
   target_update_interval: 1
   log_interval: 100

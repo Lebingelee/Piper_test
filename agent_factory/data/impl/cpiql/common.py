@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import re
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 import time
 import h5py
@@ -204,6 +205,26 @@ def _is_failure_segment_type(segment_type: str) -> bool:
     return segment_type in {"failure", "rollout_failure", "boundary_failure", "post_intervention_failure"}
 
 
+def _trajectory_freshness_key(file_path: str, traj_key: Optional[str], fallback_index: int) -> Tuple[int, int, int]:
+    """
+    Sort failures from old to new using filename timestamp first, then traj id.
+    Higher tuple means newer.
+    """
+    name = Path(file_path).stem
+    timestamp_match = re.search(r"_(\d{4})_(\d{4})(?:$|_)", name)
+    if timestamp_match:
+        return (2, int(timestamp_match.group(1)) * 10000 + int(timestamp_match.group(2)), fallback_index)
+
+    candidates = [name]
+    if traj_key:
+        candidates.append(str(traj_key))
+    for candidate in candidates:
+        traj_match = re.search(r"traj_(\d+)", candidate)
+        if traj_match:
+            return (1, int(traj_match.group(1)), fallback_index)
+    return (0, int(fallback_index), fallback_index)
+
+
 def load_flatten_trajectory(
     h5_file: h5py.File,
     traj_group: h5py.Group,
@@ -287,11 +308,9 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
             raise ValueError("No CPIQL trajectories found.")
 
         self.k_grid = [float(v) for v in cfg_get(cfg, "critic.k_grid", [0.0, 0.2, 0.4, 0.6, 0.8, 1.0])]
-        self.low_k_grid = [float(v) for v in cfg_get(cfg, "critic.low_k_grid", [0.0, 0.2, 0.4])]
-        if not self.low_k_grid:
-            self.low_k_grid = [min(self.k_grid)]
         self.gamma_floor = float(cfg_get(cfg, "critic.gamma_floor", 1e-4))
         self.success_progress_weight = float(cfg_get(cfg, "critic.success_progress_weight", 1.0))
+        self.failure_progress_weight = float(cfg_get(cfg, "critic.failure_progress_weight", 1.0))
         self.intervention_progress_weight = float(cfg_get(cfg, "critic.intervention_progress_weight", 0.3))
         self.intervention_terminal_reward = float(cfg_get(cfg, "critic.intervention_terminal_reward", 0.2))
 
@@ -308,10 +327,12 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
         self.rewards: List[np.ndarray] = []  # 每条子轨迹逐帧 reward；通常只有末帧非零。
         self.gammas: List[np.ndarray] = []  # 每条子轨迹逐帧动态折扣 gamma，用于形成近似线性的 progress return。
         self.progress_returns: List[np.ndarray] = []  # 每条子轨迹逐帧进度回报；成功段末帧为 1.0，早期逐步变小。
-        self.progress_masks: List[np.ndarray] = []  # 是否启用 progress anchor loss；成功段默认 1，失败段默认 0。
-        self.progress_weights: List[np.ndarray] = []  # progress anchor loss 权重；可降低介入边界 pseudo reward 的监督强度。
+        self.progress_masks: List[np.ndarray] = []  # progress anchor active/占比权重；成功段默认 1，失败段默认 failure_progress_weight。
+        self.progress_weights: List[np.ndarray] = []  # progress anchor 的附加缩放；如 success 总权重、介入边界 pseudo 权重等。
         self.segment_type_ids: List[int] = []  # 子轨迹类型的整数编码，对应 SEGMENT_TYPE_TO_ID。
         self.segment_type_names: List[str] = []  # 子轨迹类型名，如 "failure"、"intervention"、"success"。
+        self.segment_freshness_keys: List[Tuple[int, int, int]] = []  # 用于把失败/风险 segment 从旧到新排序。
+        self.failure_ranks: List[float] = []  # 失败/风险 segment 的新旧 rank，旧=0，新=1；非失败段默认 1。
         self.segment_terminal_rewards: List[float] = []  # 子轨迹末帧 reward；如介入边界自主段 0.2，专家成功段 1.0。
         self.segment_terminal_indices: List[int] = []  # 子轨迹终点在子轨迹内部的索引，当前通常为 len(segment)-1。
         self.segment_source_refs: List[Tuple[str, Optional[str], int, int]] = []  # 子轨迹来源：(文件路径, H5轨迹key, 原始起点, 原始终点)。
@@ -322,6 +343,7 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
         cache_start_time = time.time()
 
         self._cache_trajectories()
+        self._assign_failure_ranks()
         self.slices = self.slices_all
         self.mode = "all"
 
@@ -341,6 +363,9 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
             "segment_type",
             "segment_terminal_reward",
             "segment_end_is_intervention_boundary",
+            "failure_rank",
+            "is_success_segment",
+            "is_failure_segment",
             "k",
             "cond",
         }
@@ -500,12 +525,38 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
         self.intervention.append(local_intervention)
         self.segment_type_names.append(segment_type)
         self.segment_type_ids.append(SEGMENT_TYPE_TO_ID[segment_type])
+        self.segment_freshness_keys.append(_trajectory_freshness_key(ref.file_path, ref.traj_key, len(self.segment_type_names) - 1))
+        self.failure_ranks.append(1.0)
         self.segment_terminal_rewards.append(float(terminal_reward))
         self.segment_terminal_indices.append(len(action) - 1)
         self.segment_source_refs.append((ref.file_path, ref.traj_key, int(start_idx), int(end_idx)))
         self.segment_end_is_intervention_boundary.append(bool(end_is_intervention_boundary))
         self.env_metas.append(env_meta)
         self._build_progress_signals(len(self.action_data) - 1)
+
+    def _is_success_side_segment(self, traj_idx: int) -> bool:
+        segment_type = self.segment_type_names[traj_idx]
+        return _is_success_segment_type(segment_type) or (
+            _is_intervention_segment_type(segment_type)
+            and float(self.segment_terminal_rewards[traj_idx]) > 0.0
+        )
+
+    def _is_failure_side_segment(self, traj_idx: int) -> bool:
+        return _is_failure_segment_type(self.segment_type_names[traj_idx])
+
+    def _assign_failure_ranks(self):
+        failure_indices = [idx for idx in range(len(self.segment_type_names)) if self._is_failure_side_segment(idx)]
+        self.failure_ranks = [1.0 for _ in self.segment_type_names]
+        if not failure_indices:
+            return
+        if len(failure_indices) == 1:
+            self.failure_ranks[failure_indices[0]] = 1.0
+            return
+
+        ordered = sorted(failure_indices, key=lambda idx: (self.segment_freshness_keys[idx], idx))
+        denom = max(len(ordered) - 1, 1)
+        for rank_idx, segment_idx in enumerate(ordered):
+            self.failure_ranks[segment_idx] = float(rank_idx) / float(denom)
 
     def _execution_segments(self, traj: Dict[str, np.ndarray], intervention: np.ndarray) -> List[Tuple[int, int, str]]:
         length = len(traj["action"])
@@ -576,19 +627,18 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
             terminal_idx=terminal_idx,
         )
         returns = compute_progress_returns(rewards, gammas)
+        success_side = _is_success_segment_type(segment_type) or (
+            _is_intervention_segment_type(segment_type)
+            and float(self.segment_terminal_rewards[traj_idx]) > 0.0
+        )
         progress_mask = (
             np.ones(length, dtype=np.float32)
-            if _is_success_segment_type(segment_type)
-            else 
-            np.ones(length, dtype=np.float32)
-            
-            #0.3* np.ones(length, dtype=np.float32) set 0.3
-            
-            #np.zeros(length, dtype=np.float32) set 0.0
+            if success_side
+            else np.full(length, self.failure_progress_weight, dtype=np.float32)
         )
         if self.segment_end_is_intervention_boundary[traj_idx] and bool(cfg_get(self.cfg, "critic.anchor_intervention_pseudo", False)):
             progress_mask[:] = 1.0
-        progress_weight = progress_mask * self.success_progress_weight
+        progress_weight = np.full(length, self.success_progress_weight, dtype=np.float32)
         if self.segment_end_is_intervention_boundary[traj_idx]:
             progress_weight *= self.intervention_progress_weight
 
@@ -701,15 +751,6 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
                 obs["rgb"] = torch.from_numpy(self._load_rgb_sequence(traj_idx, indices))
         return obs
 
-    def _sample_k(self, traj_idx: int, step_idx: int) -> float:
-        del step_idx
-        segment_type = self.segment_type_names[traj_idx]
-        if _is_failure_segment_type(segment_type) or _is_intervention_segment_type(segment_type) or self.segment_end_is_intervention_boundary[traj_idx]:
-            grid = self.low_k_grid
-        else:
-            grid = self.k_grid
-        return float(grid[np.random.randint(0, len(grid))])
-
     def _transform_action_sequence(self, traj_idx: int, start: int, act_seq: torch.Tensor) -> torch.Tensor:
         if self.agent_control_mode == self.env_metas[traj_idx]["env_control_mode"]:
             return act_seq
@@ -778,8 +819,12 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
             data["segment_terminal_reward"] = torch.tensor([self.segment_terminal_rewards[traj_idx]], dtype=torch.float32)
         if "segment_end_is_intervention_boundary" in self.required_keys:
             data["segment_end_is_intervention_boundary"] = torch.tensor([self.segment_end_is_intervention_boundary[traj_idx]], dtype=torch.float32)
-        if "k" in self.required_keys:
-            data["k"] = torch.tensor([self._sample_k(traj_idx, idx)], dtype=torch.float32)
+        if "failure_rank" in self.required_keys:
+            data["failure_rank"] = torch.tensor([self.failure_ranks[traj_idx]], dtype=torch.float32)
+        if "is_success_segment" in self.required_keys:
+            data["is_success_segment"] = torch.tensor([self._is_success_side_segment(traj_idx)], dtype=torch.float32)
+        if "is_failure_segment" in self.required_keys:
+            data["is_failure_segment"] = torch.tensor([self._is_failure_side_segment(traj_idx)], dtype=torch.float32)
         if "cond" in self.required_keys and self.conds is not None:
             data["cond"] = self.conds[global_idx].reshape(1)
         if "intervention" in self.required_keys:
