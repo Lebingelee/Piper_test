@@ -71,16 +71,18 @@ class CPIQLCriticMixin(CriticEvalMixinBase):
        - For k>0, failure influence decays naturally because fewer failures stay active.
 
     3. progress_mask
-       - Controls how much the sample participates in MC/progress supervision.
-       - success-side samples: 1.0
-       - failure-side samples: failure_progress_weight
-       - intervention-boundary pseudo samples: optionally forced to 1.0 when
-         anchor_intervention_pseudo=True
+       - Dataset now provides the default semantic participation flag only.
+       - Critic thresholds it into a binary {0, 1} mask.
+       - intervention-boundary pseudo samples are either dropped or re-enabled
+         here depending on anchor_intervention_pseudo.
 
     4. progress_weight
-       - Extra scale on top of progress_mask for MC/progress supervision.
-       - default baseline: success_progress_weight
-       - intervention-boundary pseudo samples: multiplied by intervention_progress_weight
+       - Dataset now provides the default semantic weight only.
+       - Critic explicitly maps:
+         - success-side samples -> success_progress_weight
+         - failure-side samples -> failure_progress_weight
+       - intervention-boundary pseudo samples are additionally multiplied by
+         intervention_progress_weight when anchored.
 
     Final loss usage
     ----------------
@@ -94,9 +96,9 @@ class CPIQLCriticMixin(CriticEvalMixinBase):
     Default interpretation with the current config
     ----------------------------------------------
     - normal success sample:
-        progress_mask=1.0, progress_weight=1.0, class=success_class_weight
+        progress_mask in {0,1}, progress_weight=success_progress_weight, class=success_class_weight
     - normal failure sample:
-        progress_mask=failure_progress_weight, progress_weight=1.0, class=failure_class_weight
+        progress_mask in {0,1}, progress_weight=failure_progress_weight, class=failure_class_weight
     - intervention-boundary pseudo sample:
         progress_mask=1.0 only if anchor_intervention_pseudo=True,
         progress_weight=success_progress_weight * intervention_progress_weight
@@ -120,16 +122,17 @@ class CPIQLCriticMixin(CriticEvalMixinBase):
        - 当 k 逐渐增大时，由于 active failure 数减少，failure 的总影响会自然衰减。
 
     3. progress_mask
-       - 决定样本在 MC/progress supervision 中参与多少。
-       - 成功侧样本：固定为 1.0。
-       - 失败侧样本：固定为 failure_progress_weight。
-       - intervention-boundary pseudo 样本：若 anchor_intervention_pseudo=True，
-         则会被强制设为 1.0。
+       - Dataset 只提供默认语义掩码。
+       - critic 内会把它压成严格的二值 {0,1} 开关。
+       - intervention-boundary pseudo 样本也会在 critic 内根据
+         anchor_intervention_pseudo 决定是否启用。
 
     4. progress_weight
-       - 在 progress_mask 之外，再乘一个额外缩放系数。
-       - 默认基础值为 success_progress_weight。
-       - intervention-boundary pseudo 样本会再乘 intervention_progress_weight。
+       - Dataset 只提供默认附加权重。
+       - critic 内会显式映射为：
+         - 成功侧样本 -> success_progress_weight
+         - 失败侧样本 -> failure_progress_weight
+       - intervention-boundary pseudo 样本若参与，会再乘 intervention_progress_weight。
 
     最终进入各项 loss 的方式
     ------------------------
@@ -143,12 +146,12 @@ class CPIQLCriticMixin(CriticEvalMixinBase):
     按当前默认配置可直观理解为
     --------------------------
     - 普通成功样本：
-        progress_mask=1.0, progress_weight=1.0, 类别权重为 success_class_weight
+        progress_mask 只取 0/1，progress_weight=success_progress_weight，类别权重为 success_class_weight
     - 普通失败样本：
-        progress_mask=failure_progress_weight, progress_weight=1.0, 类别权重为 failure_class_weight
+        progress_mask 只取 0/1，progress_weight=failure_progress_weight，类别权重为 failure_class_weight
     - intervention-boundary pseudo 样本：
         只有 anchor_intervention_pseudo=True 时才参与 progress anchor，
-        且其 progress_weight 会再乘 intervention_progress_weight
+        且其 critic 侧 progress_weight 会再乘 intervention_progress_weight
     """
 
     CONFIG_CLASS = CPIQLCriticConfig
@@ -167,6 +170,7 @@ class CPIQLCriticMixin(CriticEvalMixinBase):
         "failure_rank",
         "is_success_segment",
         "is_failure_segment",
+        "segment_end_is_intervention_boundary",
     }
 
     def _build_critic(self):
@@ -200,6 +204,7 @@ class CPIQLCriticMixin(CriticEvalMixinBase):
             hidden_dims=cfg.hidden_dims,
             k_embed_dim=cfg.k_embed_dim,
             k_hidden_dims=cfg.k_hidden_dims,
+            k_grid=self._k_values(),
         )
 
         flat_action_dim = self.cfg.env.action_dim * self.cfg.env.pred_horizon
@@ -207,7 +212,7 @@ class CPIQLCriticMixin(CriticEvalMixinBase):
         self.q_net = CPIQLQNet(flat_action_dim=flat_action_dim, **common_args)
         self.target_q_net = copy.deepcopy(self.q_net)
         self.target_q_net.requires_grad_(False)
-        self.use_per_k_backward = bool(getattr(cfg, "use_per_k_backward", False))
+        self.use_per_k_backward = False
         self.success_class_weight = 1.0
         self.failure_class_weight = 1.0
         self.k0_success_count = 0
@@ -293,36 +298,51 @@ class CPIQLCriticMixin(CriticEvalMixinBase):
         denom = weights.sum().clamp_min(1.0)
         return (weights * (v_pred - progress_return).pow(2)).sum() / denom
 
+    def _critic_progress_factors(
+        self,
+        progress_mask: torch.Tensor,
+        progress_weight: torch.Tensor,
+        is_failure_segment: torch.Tensor,
+        segment_end_is_intervention_boundary: torch.Tensor,
+    ) -> Dict[str, torch.Tensor]:
+        cfg = self.cfg.critic
+        effective_mask = (progress_mask > 0).float()
+
+        success_weight = float(getattr(cfg, "success_progress_weight", 1.0))
+        failure_weight = float(getattr(cfg, "failure_progress_weight", 1.0))
+        failure_mask = (is_failure_segment > 0).float()
+        success_mask = 1.0 - failure_mask
+        effective_weight = progress_weight.clone() * (
+            success_mask * success_weight + failure_mask * failure_weight
+        )
+
+        boundary_mask = (segment_end_is_intervention_boundary > 0).float()
+        if torch.any(boundary_mask > 0):
+            if bool(getattr(cfg, "anchor_intervention_pseudo", False)):
+                effective_mask = effective_mask * (1.0 - boundary_mask) + boundary_mask
+                effective_weight = effective_weight * (
+                    1.0 + boundary_mask * (float(getattr(cfg, "intervention_progress_weight", 0.3)) - 1.0)
+                )
+            else:
+                effective_mask = effective_mask * (1.0 - boundary_mask)
+
+        return {
+            "mask": effective_mask,
+            "weight": effective_weight,
+        }
+
     def _k_grid_tensor(self, batch_size: int, value: float, device: torch.device) -> torch.Tensor:
         return torch.full((batch_size, 1), float(value), device=device, dtype=torch.float32)
+
+    def _k_grid_row(self, device: torch.device) -> torch.Tensor:
+        return torch.tensor(self._k_values(), device=device, dtype=torch.float32).reshape(1, -1)
 
     def _v_k_regularization(
         self,
         obs: Dict[str, torch.Tensor],
         k_values: Sequence[float] = None,
     ) -> Dict[str, torch.Tensor]:
-        cfg = self.cfg.critic
-        k_values = sorted(float(v) for v in (k_values if k_values is not None else cfg.k_grid))
-        zero = next(iter(obs.values())).new_tensor(0.0)
-        if len(k_values) < 2 or (cfg.lambda_mono <= 0 and cfg.lambda_smooth <= 0):
-            return {"mono": zero, "smooth": zero}
-
-        batch_size = next(iter(obs.values())).shape[0]
-        values = [
-            self.v_net(obs, self._k_grid_tensor(batch_size, k_value, next(iter(obs.values())).device))
-            for k_value in k_values
-        ]
-
-        mono_terms = []
-        smooth_terms = []
-        for low_v, high_v in zip(values[:-1], values[1:]):
-            mono_terms.append(F.relu(low_v - high_v).pow(2).mean())
-            if cfg.lambda_smooth > 0:
-                smooth_terms.append((high_v - low_v).pow(2).mean())
-
-        mono = torch.stack(mono_terms).mean() if mono_terms else zero
-        smooth = torch.stack(smooth_terms).mean() if smooth_terms else zero
-        return {"mono": mono, "smooth": smooth}
+        return self._backward_v_k_regularization_per_k(obs, k_values, do_backward=False)
 
     def _k_values(self) -> List[float]:
         k_values = sorted(float(v) for v in getattr(self.cfg.critic, "k_grid", [0.0, 1.0]))
@@ -366,6 +386,8 @@ class CPIQLCriticMixin(CriticEvalMixinBase):
             total = float(success_count + failure_count)
             self.success_class_weight = total / (2.0 * float(success_count))
             self.failure_class_weight = total / (2.0 * float(failure_count))
+            self.success_class_weight = 1.0 #测试如果取消类别权重，看看训练情况
+            self.failure_class_weight = 1.0
 
         return {
             "k0_success_count": float(self.k0_success_count),
@@ -375,27 +397,8 @@ class CPIQLCriticMixin(CriticEvalMixinBase):
         }
 
     def _update_k_values(self) -> List[float]:
-        k_values = self._k_values()
-        raw_num_samples = getattr(self.cfg.critic, "num_k_samples", "all")
-
-        if raw_num_samples is None:
-            return k_values
-        if isinstance(raw_num_samples, str):
-            sample_text = raw_num_samples.strip().lower()
-            if sample_text in ("", "all"):
-                return k_values
-            try:
-                num_samples = int(sample_text)
-            except ValueError:
-                return k_values
-        else:
-            num_samples = int(raw_num_samples)
-
-        if num_samples <= 0 or num_samples >= len(k_values):
-            return k_values
-
-        indices = torch.randperm(len(k_values))[:num_samples].tolist()
-        return sorted(k_values[index] for index in indices)
+        # Multi-head discrete-k critic updates every k in every step.
+        return self._k_values()
 
     def _distribution_mask(
         self,
@@ -410,6 +413,18 @@ class CPIQLCriticMixin(CriticEvalMixinBase):
         failure_mask = ((is_failure_segment > 0) & (failure_rank >= float(k_value))).float()
         return torch.clamp(success_mask + failure_mask, max=1.0)
 
+    def _distribution_mask_all(
+        self,
+        failure_rank: torch.Tensor,
+        is_success_segment: torch.Tensor,
+        is_failure_segment: torch.Tensor,
+    ) -> torch.Tensor:
+        success_mask = (is_success_segment > 0).float()
+        failure_mask = (is_failure_segment > 0).float()
+        k_row = self._k_grid_row(failure_rank.device)
+        failure_active = failure_mask * (failure_rank >= k_row).float() * (k_row < 1.0).float()
+        return torch.clamp(success_mask + failure_active, max=1.0)
+
     def _class_balanced_weights(
         self,
         is_success_segment: torch.Tensor,
@@ -422,184 +437,98 @@ class CPIQLCriticMixin(CriticEvalMixinBase):
         weights = weights + failure_mask * (float(self.failure_class_weight) - 1.0)
         return weights
 
+    def _route_weights(
+        self,
+        weighted_distribution: torch.Tensor,
+        is_success_segment: torch.Tensor,
+        is_failure_segment: torch.Tensor,
+    ) -> Dict[str, torch.Tensor]:
+        success_mask = (is_success_segment > 0).float()
+        failure_mask = (is_failure_segment > 0).float()
+        return {
+            "success": weighted_distribution * success_mask,
+            "failure": weighted_distribution * failure_mask,
+        }
+
+    def _route_weights_all(
+        self,
+        weighted_distribution: torch.Tensor,
+        is_success_segment: torch.Tensor,
+        is_failure_segment: torch.Tensor,
+    ) -> Dict[str, torch.Tensor]:
+        success_mask = (is_success_segment > 0).float()
+        failure_mask = (is_failure_segment > 0).float()
+        return {
+            "success": weighted_distribution * success_mask,
+            "failure": weighted_distribution * failure_mask,
+        }
+
+    def _routed_v_outputs(
+        self,
+        obs: Dict[str, torch.Tensor],
+        k_tensor: torch.Tensor,
+    ) -> Dict[str, torch.Tensor]:
+        return self.v_net.decompose(obs, k_tensor)
+
+    def _routed_v_outputs_all(self, obs: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        return self.v_net.decompose_all(obs)
+
+    def _routed_q_outputs(
+        self,
+        obs: Dict[str, torch.Tensor],
+        actions: torch.Tensor,
+        k_tensor: torch.Tensor,
+    ) -> Dict[str, torch.Tensor]:
+        return self.q_net.decompose(obs, actions, k_tensor)
+
+    def _routed_q_outputs_all(
+        self,
+        obs: Dict[str, torch.Tensor],
+        actions: torch.Tensor,
+    ) -> Dict[str, torch.Tensor]:
+        return self.q_net.decompose_all(obs, actions)
+
     def update_critic(self, batch: Dict[str, Any]) -> Dict[str, float]:
-        if bool(getattr(self, "use_per_k_backward", getattr(self.cfg.critic, "use_per_k_backward", False))):
-            return self._update_critic_per_k_backward(batch)
         return self._update_critic_all_k_graph(batch)
 
     def _backward_v_k_regularization_per_k(
         self,
         obs: Dict[str, torch.Tensor],
         k_values: Sequence[float],
+        do_backward: bool = True,
     ) -> Dict[str, torch.Tensor]:
         cfg = self.cfg.critic
         zero = next(iter(obs.values())).new_tensor(0.0)
         if len(k_values) < 2 or (cfg.lambda_mono <= 0 and cfg.lambda_smooth <= 0):
             return {"mono": zero, "smooth": zero}
 
-        pair_count = max(len(k_values) - 1, 1)
+        outputs = self.v_net.decompose_all(obs)
+        value_all = outputs["value_all"]
+        pair_count = max(value_all.shape[1] - 1, 1)
         mono_total = zero
         smooth_total = zero
-        batch_size = next(iter(obs.values())).shape[0]
-        device = next(iter(obs.values())).device
 
-        for low_k, high_k in zip(k_values[:-1], k_values[1:]):
-            low_v = self.v_net(obs, self._k_grid_tensor(batch_size, low_k, device))
-            high_v = self.v_net(obs, self._k_grid_tensor(batch_size, high_k, device))
-
+        for low_idx, high_idx in zip(range(value_all.shape[1] - 1), range(1, value_all.shape[1])):
+            low_value = value_all[:, low_idx:low_idx + 1]
+            high_value = value_all[:, high_idx:high_idx + 1]
             loss_terms = []
-            mono = F.relu(low_v - high_v).pow(2).mean()
+            mono = F.relu(low_value - high_value).pow(2).mean()
             mono_total = mono_total + mono.detach() / pair_count
             if cfg.lambda_mono > 0:
                 loss_terms.append(float(cfg.lambda_mono) * mono / pair_count)
 
             if cfg.lambda_smooth > 0:
-                smooth = (high_v - low_v).pow(2).mean()
+                smooth = (high_value - low_value).pow(2).mean()
                 smooth_total = smooth_total + smooth.detach() / pair_count
                 loss_terms.append(float(cfg.lambda_smooth) * smooth / pair_count)
 
-            if loss_terms:
+            if loss_terms and do_backward:
                 torch.stack(loss_terms).sum().backward()
 
         return {"mono": mono_total, "smooth": smooth_total}
 
     def _update_critic_per_k_backward(self, batch: Dict[str, Any]) -> Dict[str, float]:
-        (
-            obs,
-            actions,
-            next_obs,
-            reward,
-            discount,
-            terminated,
-            progress_return,
-            progress_mask,
-            progress_weight,
-            failure_rank,
-            is_success_segment,
-            is_failure_segment,
-            optional,
-        ) = self._prepare_critic_batch(batch)
-
-        k_values = self._update_k_values()
-        num_k = max(len(k_values), 1)
-        batch_size = actions.shape[0]
-        device = actions.device
-
-        loss_v_iql_value = 0.0
-        loss_v_progress_value = 0.0
-        active_ratios = []
-        adv_means = []
-        class_balance = self._class_balanced_weights(is_success_segment, is_failure_segment)
-
-        self.v_optimizer.zero_grad()
-        for k_value in k_values:
-            k_tensor = self._k_grid_tensor(batch_size, k_value, device)
-            distribution_mask = self._distribution_mask(k_value, failure_rank, is_success_segment, is_failure_segment)
-            weighted_distribution = distribution_mask * class_balance
-            active_ratios.append(distribution_mask.detach().mean())
-
-            with torch.no_grad():
-                q1_targ, q2_targ = self.target_q_net(obs, actions, k_tensor)
-                q_target = torch.min(q1_targ, q2_targ)
-
-            v_pred = self.v_net(obs, k_tensor)
-            adv = q_target - v_pred
-            loss_v_iql_k = self._expectile_loss(adv, weighted_distribution)
-
-            success_anchor_weight = weighted_distribution * progress_mask * progress_weight
-            loss_v_progress_k = self._progress_anchor_loss(
-                v_pred,
-                progress_return,
-                success_anchor_weight,
-                torch.ones_like(success_anchor_weight),
-            )
-            loss_v_k = (loss_v_iql_k + float(self.cfg.critic.alpha_progress) * loss_v_progress_k) / float(num_k)
-            loss_v_k.backward()
-
-            loss_v_iql_value += float(loss_v_iql_k.detach().item()) / float(num_k)
-            loss_v_progress_value += float(loss_v_progress_k.detach().item()) / float(num_k)
-            adv_means.append(adv.detach().mean())
-
-        reg = self._backward_v_k_regularization_per_k(obs, k_values)
-        if float(getattr(self.cfg.critic, "grad_clip_norm", 0.0)) > 0:
-            torch.nn.utils.clip_grad_norm_(self.v_net.parameters(), float(self.cfg.critic.grad_clip_norm))
-        self.v_optimizer.step()
-
-        loss_q_value = 0.0
-        q_target_means = []
-        self.q_optimizer.zero_grad()
-        for k_value in k_values:
-            k_tensor = self._k_grid_tensor(batch_size, k_value, device)
-            distribution_mask = self._distribution_mask(k_value, failure_rank, is_success_segment, is_failure_segment)
-            weighted_distribution = distribution_mask * class_balance
-            with torch.no_grad():
-                next_v = self.v_net(next_obs, k_tensor)
-                q_target_val = reward + discount * next_v * (1.0 - terminated)
-                q_target_means.append((distribution_mask * q_target_val).sum() / distribution_mask.sum().clamp_min(1.0))
-
-            q1_pred, q2_pred = self.q_net(obs, actions, k_tensor)
-            loss_q_k = (
-                self._masked_mse(q1_pred, q_target_val, weighted_distribution)
-                + self._masked_mse(q2_pred, q_target_val, weighted_distribution)
-            )
-            (loss_q_k / float(num_k)).backward()
-            loss_q_value += float(loss_q_k.detach().item()) / float(num_k)
-
-        if float(getattr(self.cfg.critic, "grad_clip_norm", 0.0)) > 0:
-            torch.nn.utils.clip_grad_norm_(self.q_net.parameters(), float(self.cfg.critic.grad_clip_norm))
-        self.q_optimizer.step()
-
-        with torch.no_grad():
-            gap = self.critic_gap(obs, preprocessed=True)
-            penalty_k0 = self.v_net.decompose(obs, self._k_grid_tensor(batch_size, 0.0, device))
-            penalty_k1 = self.v_net.decompose(obs, self._k_grid_tensor(batch_size, 1.0, device))
-            effective_penalty_k0 = penalty_k0["k_gate"] * penalty_k0["penalty"]
-            effective_penalty_k1 = penalty_k1["k_gate"] * penalty_k1["penalty"]
-
-        loss_v_value = (
-            loss_v_iql_value
-            + float(self.cfg.critic.alpha_progress) * loss_v_progress_value
-            + float(self.cfg.critic.lambda_mono) * float(reg["mono"].item())
-            + float(self.cfg.critic.lambda_smooth) * float(reg["smooth"].item())
-        )
-        metrics = {
-            "loss_q": float(loss_q_value),
-            "loss_v": float(loss_v_value),
-            "loss_v_iql": float(loss_v_iql_value),
-            "loss_v_progress": float(loss_v_progress_value),
-            "loss_v_success_anchor": float(loss_v_progress_value),
-            "loss_v_iql_grid": float(loss_v_iql_value),
-            "loss_q_grid": float(loss_q_value),
-            "loss_v_mono": float(reg["mono"].item()),
-            "loss_v_smooth": float(reg["smooth"].item()),
-            "k_update_count": float(num_k),
-            "k_grid_count": float(len(self._k_values())),
-            "adv_mean": float(torch.stack(adv_means).mean().item()),
-            "q_target_mean": float(torch.stack(q_target_means).mean().item()),
-            "discount_mean": float(discount.mean().item()),
-            "progress_active_ratio": float((progress_mask > 0).float().mean().item()),
-            "rank_active_ratio": float(torch.stack(active_ratios).mean().item()),
-            "success_class_weight": float(self.success_class_weight),
-            "failure_class_weight": float(self.failure_class_weight),
-            "k0_success_count": float(self.k0_success_count),
-            "k0_failure_count": float(self.k0_failure_count),
-            "penalty_mean_k0": float(effective_penalty_k0.mean().item()),
-            "penalty_mean_k1": float(effective_penalty_k1.mean().item()),
-            "critic_gap_mean": float(gap.mean().item()),
-        }
-        if "intervention" in optional:
-            metrics["intervention_ratio"] = float(optional["intervention"].float().mean().item())
-        if "intervention_segment" in optional:
-            metrics["intervention_segment_ratio"] = float(optional["intervention_segment"].float().mean().item())
-        if "segment_end_is_intervention_boundary" in optional:
-            metrics["intervention_boundary_ratio"] = float(optional["segment_end_is_intervention_boundary"].float().mean().item())
-        if "success" in optional:
-            metrics["success_ratio"] = float(optional["success"].float().mean().item())
-        if "truncated" in optional:
-            metrics["truncated_ratio"] = float(optional["truncated"].float().mean().item())
-        if "segment_terminal_reward" in optional:
-            metrics["segment_terminal_reward_mean"] = float(optional["segment_terminal_reward"].float().mean().item())
-        return metrics
+        return self._update_critic_all_k_graph(batch)
 
     def _update_critic_all_k_graph(self, batch: Dict[str, Any]) -> Dict[str, float]:
         (
@@ -619,34 +548,59 @@ class CPIQLCriticMixin(CriticEvalMixinBase):
         ) = self._prepare_critic_batch(batch)
 
         k_values = self._update_k_values()
-        batch_size = actions.shape[0]
         device = actions.device
-        loss_v_iql_terms = []
-        loss_v_progress_terms = []
-        active_ratios = []
+        k_row = self._k_grid_row(device)
         class_balance = self._class_balanced_weights(is_success_segment, is_failure_segment)
+        success_mask = (is_success_segment > 0).float()
+        boundary_mask = optional.get(
+            "segment_end_is_intervention_boundary",
+            torch.zeros_like(is_success_segment),
+        )
+        progress_factors = self._critic_progress_factors(
+            progress_mask,
+            progress_weight,
+            is_failure_segment,
+            boundary_mask,
+        )
+        distribution_mask = self._distribution_mask_all(failure_rank, is_success_segment, is_failure_segment)
+        weighted_distribution = distribution_mask * class_balance
+        family_head_mask = (k_row < 1.0).float()
+        success_head_weight = class_balance * success_mask
+        family_head_weight = weighted_distribution * family_head_mask
 
-        for k_value in k_values:
-            k_tensor = self._k_grid_tensor(batch_size, k_value, device)
-            distribution_mask = self._distribution_mask(k_value, failure_rank, is_success_segment, is_failure_segment)
-            weighted_distribution = distribution_mask * class_balance
-            active_ratios.append(distribution_mask.mean())
-
-            with torch.no_grad():
-                q1_targ, q2_targ = self.target_q_net(obs, actions, k_tensor)
-                q_target = torch.min(q1_targ, q2_targ)
-
-            v_pred = self.v_net(obs, k_tensor)
-            adv = q_target - v_pred
-            loss_v_iql_terms.append(self._expectile_loss(adv, weighted_distribution))
-
-            success_anchor_weight = weighted_distribution * progress_mask * progress_weight
-            loss_v_progress_terms.append(
-                self._progress_anchor_loss(v_pred, progress_return, success_anchor_weight, torch.ones_like(success_anchor_weight))
+        with torch.no_grad():
+            q_target_outputs = self.target_q_net.decompose_all(obs, actions)
+            q_target_success = torch.min(
+                q_target_outputs["q_success_1"],
+                q_target_outputs["q_success_2"],
+            )
+            q_target_family = torch.min(
+                q_target_outputs["q_family_1_all"],
+                q_target_outputs["q_family_2_all"],
             )
 
-        loss_v_iql = torch.stack(loss_v_iql_terms).mean()
-        loss_v_progress = torch.stack(loss_v_progress_terms).mean()
+        v_outputs = self._routed_v_outputs_all(obs)
+        adv_success = q_target_success - v_outputs["success_value"]
+        adv_family = q_target_family - v_outputs["family_value_all"]
+        loss_v_iql_success = self._expectile_loss(adv_success, success_head_weight)
+        loss_v_iql_failure = self._expectile_loss(adv_family, family_head_weight)
+        loss_v_iql = loss_v_iql_success + loss_v_iql_failure
+
+        success_anchor_weight = success_head_weight * progress_factors["mask"] * progress_factors["weight"]
+        family_anchor_weight = family_head_weight * progress_factors["mask"] * progress_factors["weight"]
+        loss_v_progress_success = self._progress_anchor_loss(
+            v_outputs["success_value"],
+            progress_return,
+            success_anchor_weight,
+            torch.ones_like(success_anchor_weight),
+        )
+        loss_v_progress_failure = self._progress_anchor_loss(
+            v_outputs["family_value_all"],
+            progress_return,
+            family_anchor_weight,
+            torch.ones_like(family_anchor_weight),
+        )
+        loss_v_progress = loss_v_progress_success + loss_v_progress_failure
         reg = self._v_k_regularization(obs, k_values)
         loss_v = (
             loss_v_iql
@@ -661,23 +615,21 @@ class CPIQLCriticMixin(CriticEvalMixinBase):
             torch.nn.utils.clip_grad_norm_(self.v_net.parameters(), float(self.cfg.critic.grad_clip_norm))
         self.v_optimizer.step()
 
-        loss_q_terms = []
-        q_target_means = []
-        for k_value in k_values:
-            k_tensor = self._k_grid_tensor(batch_size, k_value, device)
-            distribution_mask = self._distribution_mask(k_value, failure_rank, is_success_segment, is_failure_segment)
-            weighted_distribution = distribution_mask * class_balance
-            with torch.no_grad():
-                next_v = self.v_net(next_obs, k_tensor)
-                q_target_val = reward + discount * next_v * (1.0 - terminated)
-                q_target_means.append((distribution_mask * q_target_val).sum() / distribution_mask.sum().clamp_min(1.0))
+        with torch.no_grad():
+            next_v_outputs = self.v_net.decompose_all(next_obs)
+            q_target_success_val = reward + discount * next_v_outputs["success_value"] * (1.0 - terminated)
+            q_target_family_val = reward + discount * next_v_outputs["family_value_all"] * (1.0 - terminated)
 
-            q1_pred, q2_pred = self.q_net(obs, actions, k_tensor)
-            loss_q_terms.append(
-                self._masked_mse(q1_pred, q_target_val, weighted_distribution)
-                + self._masked_mse(q2_pred, q_target_val, weighted_distribution)
-            )
-        loss_q = torch.stack(loss_q_terms).mean()
+        q_outputs = self._routed_q_outputs_all(obs, actions)
+        loss_q_success = (
+            self._masked_mse(q_outputs["q_success_1"], q_target_success_val, success_head_weight)
+            + self._masked_mse(q_outputs["q_success_2"], q_target_success_val, success_head_weight)
+        )
+        loss_q_failure = (
+            self._masked_mse(q_outputs["q_family_1_all"], q_target_family_val, family_head_weight)
+            + self._masked_mse(q_outputs["q_family_2_all"], q_target_family_val, family_head_weight)
+        )
+        loss_q = loss_q_success + loss_q_failure
 
         self.q_optimizer.zero_grad()
         loss_q.backward()
@@ -686,36 +638,63 @@ class CPIQLCriticMixin(CriticEvalMixinBase):
         self.q_optimizer.step()
 
         with torch.no_grad():
-            gap = self.critic_gap(obs, preprocessed=True)
-            penalty_k0 = self.v_net.decompose(obs, self._k_grid_tensor(batch_size, 0.0, device))
-            penalty_k1 = self.v_net.decompose(obs, self._k_grid_tensor(batch_size, 1.0, device))
-            effective_penalty_k0 = penalty_k0["k_gate"] * penalty_k0["penalty"]
-            effective_penalty_k1 = penalty_k1["k_gate"] * penalty_k1["penalty"]
+            gap_outputs = self.v_net.decompose_all(obs)
+            family_value_all = gap_outputs["family_value_all"]
+            success_value = gap_outputs["success_value"]
+            k0_index = self._k_value_index(0.0)
+            k1_index = self._k_value_index(1.0)
+            gap = gap_outputs["value_all"][:, k1_index:k1_index + 1] - gap_outputs["value_all"][:, k0_index:k0_index + 1]
+            family_value_k0 = family_value_all[:, k0_index:k0_index + 1]
+            active_ratio = distribution_mask.mean()
+            q_target_mean = (
+                (success_head_weight * q_target_success_val).sum()
+                + (family_head_weight * q_target_family_val).sum()
+            ) / (success_head_weight.sum() + family_head_weight.sum()).clamp_min(1.0)
+            adv_mean = torch.cat(
+                [adv_success.detach().reshape(-1), adv_family.detach().reshape(-1)],
+                dim=0,
+            ).mean()
+            success_gap_mask = (is_success_segment > 0).float()
+            failure_gap_mask = (is_failure_segment > 0).float()
+            success_gap_mean = (gap * success_gap_mask).sum() / success_gap_mask.sum().clamp_min(1.0)
+            failure_gap_mean = (gap * failure_gap_mask).sum() / failure_gap_mask.sum().clamp_min(1.0)
 
         metrics = {
             "loss_q": float(loss_q.item()),
+            "loss_q_success": float(loss_q_success.item()),
+            "loss_q_failure": float(loss_q_failure.item()),
             "loss_v": float(loss_v.item()),
             "loss_v_iql": float(loss_v_iql.item()),
+            "loss_v_iql_success": float(loss_v_iql_success.item()),
+            "loss_v_iql_failure": float(loss_v_iql_failure.item()),
             "loss_v_progress": float(loss_v_progress.item()),
-            "loss_v_success_anchor": float(loss_v_progress.item()),
+            "loss_v_progress_success": float(loss_v_progress_success.item()),
+            "loss_v_progress_failure": float(loss_v_progress_failure.item()),
+            "loss_v_success_penalty": 0.0,
+            "loss_v_success_anchor": float(loss_v_progress_success.item()),
+            "loss_v_failure_anchor": float(loss_v_progress_failure.item()),
             "loss_v_iql_grid": float(loss_v_iql.item()),
             "loss_q_grid": float(loss_q.item()),
             "loss_v_mono": float(reg["mono"].item()),
             "loss_v_smooth": float(reg["smooth"].item()),
             "k_update_count": float(len(k_values)),
             "k_grid_count": float(len(self._k_values())),
-            "adv_mean": float(adv.detach().mean().item()),
-            "q_target_mean": float(torch.stack(q_target_means).mean().item()),
+            "adv_mean": float(adv_mean.item()),
+            "q_target_mean": float(q_target_mean.item()),
             "discount_mean": float(discount.mean().item()),
-            "progress_active_ratio": float((progress_mask > 0).float().mean().item()),
-            "rank_active_ratio": float(torch.stack(active_ratios).mean().item()),
+            "progress_active_ratio": float((progress_factors["mask"] > 0).float().mean().item()),
+            "rank_active_ratio": float(active_ratio.item()),
             "success_class_weight": float(self.success_class_weight),
             "failure_class_weight": float(self.failure_class_weight),
             "k0_success_count": float(self.k0_success_count),
             "k0_failure_count": float(self.k0_failure_count),
-            "penalty_mean_k0": float(effective_penalty_k0.mean().item()),
-            "penalty_mean_k1": float(effective_penalty_k1.mean().item()),
+            "family_value_mean_k0": float(family_value_k0.mean().item()),
+            "success_value_mean": float(success_value.mean().item()),
+            "penalty_mean_k0": float((success_value - family_value_k0).mean().item()),
+            "penalty_mean_k1": 0.0,
             "critic_gap_mean": float(gap.mean().item()),
+            "critic_gap_success_mean": float(success_gap_mean.item()),
+            "critic_gap_failure_mean": float(failure_gap_mean.item()),
         }
         if "intervention" in optional:
             metrics["intervention_ratio"] = float(optional["intervention"].float().mean().item())
@@ -870,7 +849,8 @@ class CPIQLCriticMixin(CriticEvalMixinBase):
                     "q": running.get("loss_q", 0.0) / log_interval,
                     "vp": running.get("loss_v_progress", 0.0) / log_interval,
                     "v": running.get("loss_v", 0.0) / log_interval,
-                    "gap": running.get("critic_gap_mean", 0.0) / log_interval,
+                    "gap_s": running.get("critic_gap_success_mean", 0.0) / log_interval,
+                    "gap_f": running.get("critic_gap_failure_mean", 0.0) / log_interval,
                 }
                 if "intervention_ratio" in running:
                     shown["intervene"] = running["intervention_ratio"] / log_interval
@@ -916,6 +896,13 @@ class CPIQLCriticMixin(CriticEvalMixinBase):
                 k = k.reshape(batch_size, 1)
         return k
 
+    def _k_value_index(self, k_value: float) -> int:
+        k_values = self._k_values()
+        for index, candidate in enumerate(k_values):
+            if abs(float(candidate) - float(k_value)) <= 1e-6:
+                return index
+        raise ValueError(f"CPIQL discrete-k critic only supports k_grid={k_values}, got k={k_value}")
+
     @torch.no_grad()
     def predict_v(self, obs: Dict[str, Any], k: Any, preprocessed: bool = False) -> torch.Tensor:
         obs = self._prepare_inference_obs(obs, preprocessed=preprocessed)
@@ -941,9 +928,10 @@ class CPIQLCriticMixin(CriticEvalMixinBase):
     @torch.no_grad()
     def critic_gap(self, obs: Dict[str, Any], preprocessed: bool = False) -> torch.Tensor:
         obs = self._prepare_inference_obs(obs, preprocessed=preprocessed)
-        v_success = self.predict_v(obs, 1.0, preprocessed=True)
-        v_realistic = self.predict_v(obs, 0.0, preprocessed=True)
-        return v_success - v_realistic
+        outputs = self.v_net.decompose_all(obs)
+        k0_index = self._k_value_index(0.0)
+        k1_index = self._k_value_index(1.0)
+        return outputs["value_all"][:, k1_index:k1_index + 1] - outputs["value_all"][:, k0_index:k0_index + 1]
 
     @torch.no_grad()
     def compute_advantage(
@@ -976,8 +964,11 @@ class CPIQLCriticMixin(CriticEvalMixinBase):
         if "frame" in batch:
             results["frame"] = batch["frame"].reshape(-1).detach().cpu().long()
 
-        v_k0 = self.predict_v(obs, 0.0, preprocessed=True).reshape(-1).detach().cpu()
-        v_k1 = self.predict_v(obs, 1.0, preprocessed=True).reshape(-1).detach().cpu()
+        v_outputs = self.v_net.decompose_all(obs)
+        k0_index = self._k_value_index(0.0)
+        k1_index = self._k_value_index(1.0)
+        v_k0 = v_outputs["value_all"][:, k0_index].reshape(-1).detach().cpu()
+        v_k1 = v_outputs["value_all"][:, k1_index].reshape(-1).detach().cpu()
         gap = (v_k1 - v_k0).detach().cpu()
 
         results["figure:value/V(k=0)"] = v_k0

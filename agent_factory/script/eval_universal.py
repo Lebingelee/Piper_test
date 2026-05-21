@@ -4,7 +4,7 @@ import re
 import sys
 import tempfile
 from collections import defaultdict
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 if __package__ in {None, ""}:
     _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -84,6 +84,7 @@ def _plot_eval_results(
     aggregated: Dict[str, np.ndarray],
     save_dir: str,
     title_prefix: str = "",
+    y_lim: Optional[List[float]] = None,
 ) -> List[str]:
     frame = aggregated.get("frame")
     if frame is None:
@@ -115,6 +116,8 @@ def _plot_eval_results(
         ax.set_ylabel("Critic Output")
         title = f"{title_prefix} {figure_name}".strip()
         ax.set_title(title)
+        if y_lim is not None:
+            ax.set_ylim(y_lim[0], y_lim[1])
         ax.grid(True, alpha=0.3)
         ax.legend(loc="best")
         fig.tight_layout()
@@ -146,6 +149,15 @@ def parse_args():
     parser.add_argument("--traj-idx", "--traj_idx", type=int, default=0, help="Trajectory index inside the replay .h5 file.")
     parser.add_argument("--device", default="", help="Evaluation device, e.g. cpu or cuda:0.")
     parser.add_argument("--batch-size", "--batch_size", type=int, default=64, help="Window batch size for critic evaluation.")
+    parser.add_argument(
+        "--y-lim",
+        "--y_lim",
+        nargs=2,
+        type=float,
+        default=[-0.3, 1.0],
+        metavar=("YMIN", "YMAX"),
+        help="Y-axis limits for saved plots.",
+    )
     parser.add_argument("--only-obs", action="store_true", help="Only evaluate observation-based value metrics.")
     parser.add_argument("--save-npz", action="store_true", help="Also save aggregated metric arrays to eval_metrics.npz.")
     return parser.parse_args()
@@ -208,7 +220,14 @@ def main():
 
     aggregated = _merge_eval_outputs(outputs)
     title_prefix = f"{cfg.agent_type} traj={args.traj_idx}"
-    saved_figures = _plot_eval_results(aggregated, save_dir=args.save_dir, title_prefix=title_prefix)
+    if args.y_lim[0] >= args.y_lim[1]:
+        raise ValueError(f"Expected y_lim as [ymin, ymax] with ymin < ymax, got {args.y_lim}.")
+    saved_figures = _plot_eval_results(
+        aggregated,
+        save_dir=args.save_dir,
+        title_prefix=title_prefix,
+        y_lim=args.y_lim,
+    )
 
     print("[Eval] Saved figures:")
     for path in saved_figures:

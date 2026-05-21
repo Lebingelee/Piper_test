@@ -309,9 +309,6 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
 
         self.k_grid = [float(v) for v in cfg_get(cfg, "critic.k_grid", [0.0, 0.2, 0.4, 0.6, 0.8, 1.0])]
         self.gamma_floor = float(cfg_get(cfg, "critic.gamma_floor", 1e-4))
-        self.success_progress_weight = float(cfg_get(cfg, "critic.success_progress_weight", 1.0))
-        self.failure_progress_weight = float(cfg_get(cfg, "critic.failure_progress_weight", 1.0))
-        self.intervention_progress_weight = float(cfg_get(cfg, "critic.intervention_progress_weight", 0.3))
         self.intervention_terminal_reward = float(cfg_get(cfg, "critic.intervention_terminal_reward", 0.2))
 
         # 下面所有按轨迹存储的 list，索引单位都是“拆分后的子轨迹”，不是原始 H5 轨迹。
@@ -327,8 +324,8 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
         self.rewards: List[np.ndarray] = []  # 每条子轨迹逐帧 reward；通常只有末帧非零。
         self.gammas: List[np.ndarray] = []  # 每条子轨迹逐帧动态折扣 gamma，用于形成近似线性的 progress return。
         self.progress_returns: List[np.ndarray] = []  # 每条子轨迹逐帧进度回报；成功段末帧为 1.0，早期逐步变小。
-        self.progress_masks: List[np.ndarray] = []  # progress anchor active/占比权重；成功段默认 1，失败段默认 failure_progress_weight。
-        self.progress_weights: List[np.ndarray] = []  # progress anchor 的附加缩放；如 success 总权重、介入边界 pseudo 权重等。
+        self.progress_masks: List[np.ndarray] = []  # progress anchor 默认参与掩码；具体权重在 critic 中按样本语义计算。
+        self.progress_weights: List[np.ndarray] = []  # progress anchor 默认附加权重；具体 success/failure/boundary 缩放在 critic 中计算。
         self.segment_type_ids: List[int] = []  # 子轨迹类型的整数编码，对应 SEGMENT_TYPE_TO_ID。
         self.segment_type_names: List[str] = []  # 子轨迹类型名，如 "failure"、"intervention"、"success"。
         self.segment_freshness_keys: List[Tuple[int, int, int]] = []  # 用于把失败/风险 segment 从旧到新排序。
@@ -627,20 +624,8 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
             terminal_idx=terminal_idx,
         )
         returns = compute_progress_returns(rewards, gammas)
-        success_side = _is_success_segment_type(segment_type) or (
-            _is_intervention_segment_type(segment_type)
-            and float(self.segment_terminal_rewards[traj_idx]) > 0.0
-        )
-        progress_mask = (
-            np.ones(length, dtype=np.float32)
-            if success_side
-            else np.full(length, self.failure_progress_weight, dtype=np.float32)
-        )
-        if self.segment_end_is_intervention_boundary[traj_idx] and bool(cfg_get(self.cfg, "critic.anchor_intervention_pseudo", False)):
-            progress_mask[:] = 1.0
-        progress_weight = np.full(length, self.success_progress_weight, dtype=np.float32)
-        if self.segment_end_is_intervention_boundary[traj_idx]:
-            progress_weight *= self.intervention_progress_weight
+        progress_mask = np.ones(length, dtype=np.float32)
+        progress_weight = np.ones(length, dtype=np.float32)
 
         if traj_idx < len(self.rewards):
             self.rewards[traj_idx] = rewards

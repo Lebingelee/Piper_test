@@ -15,15 +15,18 @@ from agent_factory.script.train_universal import resolve_config_path, train_univ
 # Edit the constants below, then run:
 #   python agent_factory/script/train_universal_manual.py
 
-CONFIG_PATH: Optional[str] = "train_setting/debug/cpiql_train.yaml"
+CONFIG_PATH: Optional[str] = "train_setting/model_config.yaml"
 FINETUNE: bool = False
 DRY_RUN: bool = False
 
 TRAIN_OVERRIDES: Dict[str, object] = {
+    
+    "ckpt_path": "train_setting/debug/train_test/cpiql_critic_step_2500.pth"
+
     """
     "critic_iters": 3000,
     "actor_iters": 20000,
-    #"ckpt_path": "run_results/piper_dual_merged_cpiql_dac/actor_final.pth",
+    #,
     # Common finetune defaults. Remove or edit as needed.
     "dataset_key": "expert_dataset+replaybuffer",
     "exp_name": "piper_dual_merged_cpiql_dac_finetune",

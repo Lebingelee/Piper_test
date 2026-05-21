@@ -5,12 +5,12 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Adjust these parameters before running.
 PYTHON_BIN="${PYTHON_BIN:-python3}"
-INPUT_H5_PATH="${INPUT_H5_PATH:-data/Rollout_cpiql/group_1/traj_8_0514_2354.h5}"
-OUTPUT_VIDEO_PATH="${OUTPUT_VIDEO_PATH:-data/video/traj_8_0514_2354.mp4}"
+INPUT_H5_PATH="${INPUT_H5_PATH:-data/test/traj_2_0514_2348.h5}"
+OUTPUT_VIDEO_PATH="${OUTPUT_VIDEO_PATH:-data/video/traj_2_0514_2348.mp4}"
 TRAJ_KEY="${TRAJ_KEY:-}"
-SAMPLE_EVERY="${SAMPLE_EVERY:-5}"
+SAMPLE_EVERY="${SAMPLE_EVERY:-4}"
 SOURCE_FPS="${SOURCE_FPS:-30}"
-OUTPUT_FPS="${OUTPUT_FPS:-}"
+OUTPUT_FPS="${OUTPUT_FPS:-15}"
 SAVE_FRAMES_DIR="${SAVE_FRAMES_DIR:-}"
 NO_LABELS="${NO_LABELS:-0}"
 

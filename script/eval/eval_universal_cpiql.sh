@@ -6,12 +6,14 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # Adjust these parameters before running.
 PYTHON_BIN="${PYTHON_BIN:-python}"
 CONFIG_PATH="${CONFIG_PATH:-train_setting/debug/train_test/model_config.yaml}"
-CKPT_PATH="${CKPT_PATH:-train_setting/debug/train_test/cpiql_critic_step_8000.pth}"
-REPLAY_H5_PATH="${REPLAY_H5_PATH:-data/Rollout_cpiql/group_1/traj_16_0515_1923.h5}"
-SAVE_DIR="${SAVE_DIR:-eval/weight_cpiql_anchor0.1}"
+CKPT_PATH="${CKPT_PATH:-train_setting/debug/train_test/critic_final.pth}"
+REPLAY_H5_PATH="${REPLAY_H5_PATH:-data/Rollout_cpiql/group_1/traj_10_0514_2356.h5}"
+SAVE_DIR="${SAVE_DIR:-eval/weight_cpiql_decoupling}"
 TRAJ_IDX="${TRAJ_IDX:-0}"
 DEVICE="${DEVICE:-}"
-BATCH_SIZE="${BATCH_SIZE:-64}"
+BATCH_SIZE="${BATCH_SIZE:-16}"
+Y_LIM_MIN="${Y_LIM_MIN:--0.3}"
+Y_LIM_MAX="${Y_LIM_MAX:-1.0}"
 ONLY_OBS="${ONLY_OBS:-0}"
 SAVE_NPZ="${SAVE_NPZ:-0}"
 
@@ -38,6 +40,7 @@ CMD=(
   "--save_dir" "${SAVE_DIR}"
   "--traj_idx" "${TRAJ_IDX}"
   "--batch_size" "${BATCH_SIZE}"
+  "--y_lim" "${Y_LIM_MIN}" "${Y_LIM_MAX}"
 )
 
 if [[ -n "${DEVICE}" ]]; then
