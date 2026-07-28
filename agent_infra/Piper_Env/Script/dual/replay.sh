@@ -2,7 +2,7 @@
 # Piper 双臂轨迹回放启动脚本
 
 CONFIG_PATH="agent_infra/Piper_Env/Config/dual_piper_config.yaml"
-traj_PATH="agent_infra/Piper_Env/Record/data/piper_towel_h5_joint_task/h5_raw/traj_0_193839.h5"
+traj_PATH="agent_infra/Piper_Env/Record/data/piper_STACK_h5_joint_task/h5_raw/traj_0_225006.h5"
 CTRL_MODE="joint"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 

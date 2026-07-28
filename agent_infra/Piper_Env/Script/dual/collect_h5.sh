@@ -2,7 +2,7 @@
 # Piper 双臂 H5 专家示教采集启动脚本
 
 CTRL_MODE="joint"
-TASK_NAME="piper_towel_h5_${CTRL_MODE}_task"
+TASK_NAME="piper_STACK_h5_${CTRL_MODE}_task"
 CONFIG_PATH="agent_infra/Piper_Env/Config/dual_piper_config.yaml"
 MASTER_CAN_LEFT="can_ml"
 MASTER_CAN_RIGHT="can_mr"

@@ -12,7 +12,7 @@ env:
   server_mode: false
   obs_horizon: 2
   pred_horizon: 48
-  act_horizon: 48
+  act_horizon: 32
   num_cameras: 3
   obs_mode: rgb
   env_control_mode: absolute_joint
@@ -21,15 +21,15 @@ env:
   reward_mode: sparse
   render_mode: rgb_array
   max_episode_steps: 600
-  gamma: 0.99
+  gamma: 0.995
   penalty: -150.0
   reward_scale: 100
   reward_shape: false
 train:
   device: cuda:0
-  batch_size: 24
-  num_workers: 20
-  n_epochs: 1000
+  batch_size: 16
+  num_workers: 12
+  n_epochs: 5000
   save_interval: 15000
   train_object: critic_then_actor
   dataset_mode: expert_dataset
@@ -38,13 +38,13 @@ train:
   actor_iters: 60000
   critic_ckpt_path: ''
   save_root: run_results
-  exp_name: piper_dual_merged_cpiql_dac
+  exp_name: Stack_cpiql_dac
 dataset:
   dataset_type: cpiql
   include_rgb: true
   include_depth: false
   expert:
-    demo_path: data/merged/dual_merged.h5
+    demo_path: data/merged/dual_piper_STACK_h5_joint_task_merged.h5
     num_traj: null
     format: auto
   replaybuffer:
@@ -60,6 +60,12 @@ runner:
   hitl_override_key: t
   hitl_source: keyboard
   hitl_finalize_intervention: true
+  no_safe_action_gap: false
+  planning_wait_sleep: 0.002
+  risk_check_hz: 0.0
+  risk_use_safe_action: true
+  deploy_continue_key: c
+  deploy_save_key: s
 actor:
   type: cpiql_dac_diffusion
   obs_horizon: 2
@@ -143,15 +149,11 @@ critic:
   - 32
   k_grid:
   - 0.0
-  - 0.2
-  - 0.4
-  - 0.6
-  - 0.8
+  - 0.5
   - 1.0
   low_k_grid:
   - 0.0
-  - 0.2
-  - 0.4
+  - 0.5
   gamma_floor: 0.0001
   alpha_progress: 1.0
   lambda_mono: 0.05

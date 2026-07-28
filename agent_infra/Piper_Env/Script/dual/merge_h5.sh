@@ -3,10 +3,10 @@
 
 TARGET_CONTROL_MODE="joint"
 #TASK_NAME="piper_dual_h5_${TARGET_CONTROL_MODE}_task"
-TASK_NAME="piper_towel_h5_joint_task"
+TASK_NAME="piper_STACK_h5_joint_task"
 
 INPUT_PATH="agent_infra/Piper_Env/Record/data/${TASK_NAME}/h5_raw"
-OUTPUT_PATH="data/merged/dual_merged.h5"
+OUTPUT_PATH="data/merged/dual_${TASK_NAME}_merged.h5"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 
 export PYTHONPATH="$(pwd):$PYTHONPATH"

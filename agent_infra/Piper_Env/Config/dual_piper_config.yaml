@@ -25,7 +25,7 @@ common:
   master_gripper_zero_epsilon_m: 0.001
   master_gripper_zero_guard_threshold_m: 0.03
   master_read_hz: 60
-  master_follow: true
+  master_follow: false
   sync_joint_threshold_rad: 0.12
   sync_pose_threshold: 0.03
 
