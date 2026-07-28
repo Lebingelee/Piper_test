@@ -7,6 +7,7 @@ from tqdm import tqdm
 from typing import Dict, Literal, Optional
 
 # 引用组件
+from agent_factory.agents.mixins.critic.base_eval import CriticEvalMixinBase
 
 from agent_factory.modules.critics.itqc_critic import MultiHeadQuantileNet
 from agent_factory.modules.encoders.visual_encoder import VisualEncoder
@@ -26,11 +27,11 @@ class ITQCCriticConfig(BaseCriticConfig):
 
 
 
-class ITQCCriticMixin: #Implicit Truncated Q-learning
+class ITQCCriticMixin(CriticEvalMixinBase): #Implicit Truncated Q-learning
 
     CONFIG_CLASS = ITQCCriticConfig
     CONFIG_KEY = "critic"
-    REQUIRED_KEYS = {"observations", "action", "next_observations", "reward", "terminated", "value"}
+    REQUIRED_KEYS = {"observations", "action", "next_observations", "reward", "terminated", "discount", "value"}
 
     def _build_critic(self):
         cfg = self.cfg.critic
@@ -191,21 +192,36 @@ class ITQCCriticMixin: #Implicit Truncated Q-learning
         rewards = rewards / scale
 
         dones = batch["terminated"].to(self.device).float()
-        if dones.ndim == 1: dones = dones.unsqueeze(-1)
+        if dones.ndim == 1:
+            dones = dones.unsqueeze(-1)
+
+        discounts = batch.get("discount", None)
+        if discounts is not None:
+            discounts = discounts.to(self.device).float()
+            if discounts.ndim == 1:
+                discounts = discounts.unsqueeze(-1)
+        else:
+            discounts = (1.0 - dones) * float(self.cfg.env.gamma)
 
         # MC Values
         mc_values = batch["value"].to(self.device) # GT from dataset
-        if mc_values.ndim == 1: mc_values = mc_values.unsqueeze(-1)
+        if mc_values.ndim == 1:
+            mc_values = mc_values.unsqueeze(-1)
         mc_values = mc_values / scale
 
-        return obs, actions, rewards, next_obs, dones, mc_values
+        return obs, actions, rewards, next_obs, dones, discounts, mc_values
+
+    def _distribution_mean(self, values: torch.Tensor) -> torch.Tensor:
+        return values.mean(dim=(1, 2), keepdim=False).unsqueeze(-1)
+
     def compute_loss_critic(
         self, 
         obs: torch.Tensor, 
         actions: torch.Tensor, 
         rewards: torch.Tensor, 
         next_obs: torch.Tensor, 
-        dones: torch.Tensor, 
+        dones: torch.Tensor,
+        discounts: torch.Tensor,
         mc_returns: torch.Tensor,
         critic_type: Literal["Standard", "Pretty"] = "Standard"
             ) :
@@ -213,8 +229,6 @@ class ITQCCriticMixin: #Implicit Truncated Q-learning
         计算 Critic (V-Net 和 Q-Net) 的 Loss。
         参数对应 RL 中的 (s, a, r, s', d) 以及 MC 回报。
         """
-        gamma = self.cfg.env.gamma
-
         # 1. 切换网络上下文 (根据 critic_type 选择对应的网络实例)
         if critic_type == "Standard":
             q_net, v_net = self.q_net, self.v_net
@@ -251,7 +265,8 @@ class ITQCCriticMixin: #Implicit Truncated Q-learning
             # Flatten atoms: [B, M, N] -> [B, M*N]
             next_v_flat = next_v_pred.reshape(rewards.shape[0], -1)
             # Distributional Bellman Update
-            target_q_atoms = rewards + gamma * (1.0 - dones) * next_v_flat
+            del dones
+            target_q_atoms = rewards + discounts * next_v_flat
         
         loss_q_map = self.quantile_huber_loss(q_pred, target_q_atoms, tau, kappa=self.cfg.critic.quantile_huber_kappa)
         loss_q = loss_q_map.mean()
@@ -270,11 +285,11 @@ class ITQCCriticMixin: #Implicit Truncated Q-learning
         """
         # 1. 准备数据 (解包 Batch -> Tensors)
         # 确保 _prepare_batch_for_itqc 返回的顺序与 compute_loss_critic 参数一致
-        obs, actions, rewards, next_obs, dones, mc_returns = self._prepare_batch_for_itqc(batch)
+        obs, actions, rewards, next_obs, dones, discounts, mc_returns = self._prepare_batch_for_itqc(batch)
         
         # 2. 计算 Loss
         loss_v, loss_q, adv = self.compute_loss_critic(
-            obs, actions, rewards, next_obs, dones, mc_returns, critic_type
+            obs, actions, rewards, next_obs, dones, discounts, mc_returns, critic_type
         )
 
         # 3. 获取优化器
@@ -298,6 +313,35 @@ class ITQCCriticMixin: #Implicit Truncated Q-learning
             f"loss_q": loss_q.item(), 
             "adv": adv
         }
+
+    @torch.no_grad()
+    def eval_batch(self, batch: Dict, only_obs: bool = True) -> Dict[str, torch.Tensor]:
+        obs = self._preprocess_obs(batch["observations"])
+
+        v_std = self._distribution_mean(self.v_net(obs))
+        v_suc = self._distribution_mean(self.suc_v_net(obs))
+        gap = v_suc - v_std
+
+        results = {
+            "figure:value/V(k=0)": v_std.squeeze(-1),
+            "figure:value/V(k=1)": v_suc.squeeze(-1),
+            "figure:value/critic_gap": gap.squeeze(-1),
+        }
+
+        if not only_obs:
+            actions = batch["action"].to(self.device)
+            q_std = self._distribution_mean(self.q_net(obs, actions))
+            q_suc = self._distribution_mean(self.suc_q_net(obs, actions))
+            adv_std = q_std - v_std
+
+            results["figure:action_value/Q(k=0)"] = q_std.squeeze(-1)
+            results["figure:action_value/Q(k=1)"] = q_suc.squeeze(-1)
+            results["figure:action_value/adv(k=0)"] = adv_std.squeeze(-1)
+
+        if "frame" in batch:
+            results["frame"] = batch["frame"]
+        return results
+
     def relabel_data(self, dataset, phase="pretrain", critic_type="normal"):
         """ITQC Relabel: Adv = Mean(Q) - Mean(V_filtered)"""
         print(f"[ITQC Relabel] Phase: {phase}, Type: {critic_type}")

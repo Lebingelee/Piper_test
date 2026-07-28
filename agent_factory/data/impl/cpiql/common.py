@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import re
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 import time
 import h5py
@@ -15,12 +16,28 @@ from agent_factory.control import (
 )
 from agent_factory.data.base import BaseTrajectoryDataset, TrajectoryRef, traj_sort_key
 
+# Hard-coded global switch for CPIQL RGB loading behavior.
+# - "all":  preload full RGB trajectories into memory during dataset init
+# - "lazy": keep state/action/meta preloaded, but fetch RGB on demand
+#           inside __getitem__ for the requested obs_horizon window
+#
+# This is intentionally not exposed as a config field for now.
+CPIQL_RGB_LOAD_MODE = "lazy"#"all" # 
+
+if CPIQL_RGB_LOAD_MODE not in {"all", "lazy"}:
+    raise ValueError(
+        f"Unsupported CPIQL_RGB_LOAD_MODE={CPIQL_RGB_LOAD_MODE!r}. Expected 'all' or 'lazy'."
+    )
+
 
 SEGMENT_TYPE_TO_ID = {
     "failure": 0,
     "success": 1,
     "intervention": 2,
     "unknown": 3,
+    "rollout_failure": 4,
+    "boundary_failure": 5,
+    "post_intervention_failure": 6,
 }
 
 
@@ -135,6 +152,31 @@ def _concat_rgb_group(group: h5py.Group, keys: Sequence[str]) -> np.ndarray:
     return np.concatenate(arrays, axis=1)
 
 
+def _describe_rgb_source(group: h5py.Group, meta: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if "rgb" not in group:
+        return None
+    rgb_node = group["rgb"]
+    if isinstance(rgb_node, h5py.Dataset):
+        return {"mode": "dataset"}
+    rgb_keys = _ordered_group_keys(rgb_node, meta, "obs", "rgb")
+    return {"mode": "group", "keys": list(rgb_keys)}
+
+
+def _read_rgb_frames(obs_group: h5py.Group, rgb_source: Dict[str, Any], indices: Sequence[int]) -> np.ndarray:
+    rgb_node = obs_group["rgb"]
+    if rgb_source.get("mode") == "dataset":
+        return np.stack([rgb_node[int(idx)][()] for idx in indices], axis=0)
+
+    arrays = []
+    rgb_keys = rgb_source.get("keys", [])
+    for key in rgb_keys:
+        ds = rgb_node[key]
+        arrays.append(np.stack([ds[int(idx)][()] for idx in indices], axis=0))
+    if not arrays:
+        raise KeyError(f"No rgb datasets found under group {rgb_node.name}")
+    return np.concatenate(arrays, axis=1)
+
+
 def _read_meta(h5_file: h5py.File, traj_group: h5py.Group) -> Dict[str, Any]:
     if "meta" in h5_file and "env_meta" in h5_file["meta"]:
         return _read_json_dataset(h5_file["meta"]["env_meta"])
@@ -151,7 +193,44 @@ def _is_external_intervention_boundary(reason: Any) -> bool:
     return str(reason).strip().lower() in {"teleop_start"}
 
 
-def load_flatten_trajectory(h5_file: h5py.File, traj_group: h5py.Group, include_rgb: bool = True) -> Dict[str, np.ndarray]:
+def _is_success_segment_type(segment_type: str) -> bool:
+    return segment_type == "success"
+
+
+def _is_intervention_segment_type(segment_type: str) -> bool:
+    return segment_type == "intervention"
+
+
+def _is_failure_segment_type(segment_type: str) -> bool:
+    return segment_type in {"failure", "rollout_failure", "boundary_failure", "post_intervention_failure"}
+
+
+def _trajectory_freshness_key(file_path: str, traj_key: Optional[str], fallback_index: int) -> Tuple[int, int, int]:
+    """
+    Sort failures from old to new using filename timestamp first, then traj id.
+    Higher tuple means newer.
+    """
+    name = Path(file_path).stem
+    timestamp_match = re.search(r"_(\d{4})_(\d{4})(?:$|_)", name)
+    if timestamp_match:
+        return (2, int(timestamp_match.group(1)) * 10000 + int(timestamp_match.group(2)), fallback_index)
+
+    candidates = [name]
+    if traj_key:
+        candidates.append(str(traj_key))
+    for candidate in candidates:
+        traj_match = re.search(r"traj_(\d+)", candidate)
+        if traj_match:
+            return (1, int(traj_match.group(1)), fallback_index)
+    return (0, int(fallback_index), fallback_index)
+
+
+def load_flatten_trajectory(
+    h5_file: h5py.File,
+    traj_group: h5py.Group,
+    include_rgb: bool = True,
+    lazy_rgb: bool = False,
+) -> Dict[str, np.ndarray]:
     if "obs" not in traj_group or "action" not in traj_group:
         raise KeyError(f"CPIQL trajectory {traj_group.name} requires 'obs' and 'action' keys.")
     for key in ("success", "terminated", "truncated"):
@@ -169,12 +248,15 @@ def load_flatten_trajectory(h5_file: h5py.File, traj_group: h5py.Group, include_
         action = _concat_group_leaves(action_node, action_keys)
 
     obs: Dict[str, np.ndarray] = {}
+    rgb_source = None
     if include_rgb and "rgb" in obs_group:
-        if isinstance(obs_group["rgb"], h5py.Dataset):
-            obs["rgb"] = obs_group["rgb"][()]
-        else:
-            rgb_keys = _ordered_group_keys(obs_group["rgb"], meta, "obs", "rgb")
-            obs["rgb"] = _concat_rgb_group(obs_group["rgb"], rgb_keys)
+        rgb_source = _describe_rgb_source(obs_group, meta)
+        if not lazy_rgb:
+            if isinstance(obs_group["rgb"], h5py.Dataset):
+                obs["rgb"] = obs_group["rgb"][()]
+            else:
+                rgb_keys = _ordered_group_keys(obs_group["rgb"], meta, "obs", "rgb")
+                obs["rgb"] = _concat_rgb_group(obs_group["rgb"], rgb_keys)
     if "state" in obs_group:
         if isinstance(obs_group["state"], h5py.Dataset):
             obs["state"] = obs_group["state"][()].astype(np.float32)
@@ -193,6 +275,7 @@ def load_flatten_trajectory(h5_file: h5py.File, traj_group: h5py.Group, include_
         "terminated": np.asarray(traj_group["terminated"][()], dtype=bool).reshape(-1)[:length],
         "truncated": np.asarray(traj_group["truncated"][()], dtype=bool).reshape(-1)[:length],
         "boundary_reason": traj_group.attrs.get("boundary_reason", ""),
+        "rgb_source": rgb_source,
     }
 
 
@@ -216,6 +299,8 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
         self.pred_horizon = int(cfg.env.pred_horizon)
         self.act_horizon = int(cfg.env.act_horizon)
         self.include_rgb = bool(cfg_get(cfg, "dataset.include_rgb", True))
+        self.rgb_load_mode = CPIQL_RGB_LOAD_MODE
+        self.lazy_rgb = self.include_rgb and self.rgb_load_mode == "lazy"
         self.require_intervention = require_intervention
 
         super().__init__(h5_path=h5_path, folder_path=folder_path, num_traj=num_traj)
@@ -223,18 +308,14 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
             raise ValueError("No CPIQL trajectories found.")
 
         self.k_grid = [float(v) for v in cfg_get(cfg, "critic.k_grid", [0.0, 0.2, 0.4, 0.6, 0.8, 1.0])]
-        self.low_k_grid = [float(v) for v in cfg_get(cfg, "critic.low_k_grid", [0.0, 0.2, 0.4])]
-        if not self.low_k_grid:
-            self.low_k_grid = [min(self.k_grid)]
         self.gamma_floor = float(cfg_get(cfg, "critic.gamma_floor", 1e-4))
-        self.success_progress_weight = float(cfg_get(cfg, "critic.success_progress_weight", 1.0))
-        self.intervention_progress_weight = float(cfg_get(cfg, "critic.intervention_progress_weight", 0.3))
         self.intervention_terminal_reward = float(cfg_get(cfg, "critic.intervention_terminal_reward", 0.2))
 
         # 下面所有按轨迹存储的 list，索引单位都是“拆分后的子轨迹”，不是原始 H5 轨迹。
         # 例如一条原始轨迹 intervention=[0,0,0,1,1,0,0,0,1,0,0,0]，
         # 会被拆成 5 条子轨迹：[0:2], [3:4], [5:7], [8:8], [9:11]。
         self.obs_data: List[Dict[str, np.ndarray]] = []  # 每条子轨迹的观测字典，如 {"rgb": [T,C,H,W], "state": [T,D]}。
+        self.rgb_sources: List[Optional[Dict[str, Any]]] = []  # 懒加载 RGB 的源描述与原始轨迹切片信息。
         self.action_data: List[torch.Tensor] = []  # 每条子轨迹的动作序列，形状通常为 [T, action_dim]。
         self.success: List[np.ndarray] = []  # 每条子轨迹逐帧成功标记；专家接管后直接成功时，专家段末帧可为 True。
         self.terminated: List[np.ndarray] = []  # 每条子轨迹逐帧自然终止标记，用于关闭 bootstrap。
@@ -243,10 +324,12 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
         self.rewards: List[np.ndarray] = []  # 每条子轨迹逐帧 reward；通常只有末帧非零。
         self.gammas: List[np.ndarray] = []  # 每条子轨迹逐帧动态折扣 gamma，用于形成近似线性的 progress return。
         self.progress_returns: List[np.ndarray] = []  # 每条子轨迹逐帧进度回报；成功段末帧为 1.0，早期逐步变小。
-        self.progress_masks: List[np.ndarray] = []  # 是否启用 progress anchor loss；成功段默认 1，失败段默认 0。
-        self.progress_weights: List[np.ndarray] = []  # progress anchor loss 权重；可降低介入边界 pseudo reward 的监督强度。
+        self.progress_masks: List[np.ndarray] = []  # progress anchor 默认参与掩码；具体权重在 critic 中按样本语义计算。
+        self.progress_weights: List[np.ndarray] = []  # progress anchor 默认附加权重；具体 success/failure/boundary 缩放在 critic 中计算。
         self.segment_type_ids: List[int] = []  # 子轨迹类型的整数编码，对应 SEGMENT_TYPE_TO_ID。
         self.segment_type_names: List[str] = []  # 子轨迹类型名，如 "failure"、"intervention"、"success"。
+        self.segment_freshness_keys: List[Tuple[int, int, int]] = []  # 用于把失败/风险 segment 从旧到新排序。
+        self.failure_ranks: List[float] = []  # 失败/风险 segment 的新旧 rank，旧=0，新=1；非失败段默认 1。
         self.segment_terminal_rewards: List[float] = []  # 子轨迹末帧 reward；如介入边界自主段 0.2，专家成功段 1.0。
         self.segment_terminal_indices: List[int] = []  # 子轨迹终点在子轨迹内部的索引，当前通常为 len(segment)-1。
         self.segment_source_refs: List[Tuple[str, Optional[str], int, int]] = []  # 子轨迹来源：(文件路径, H5轨迹key, 原始起点, 原始终点)。
@@ -257,6 +340,7 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
         cache_start_time = time.time()
 
         self._cache_trajectories()
+        self._assign_failure_ranks()
         self.slices = self.slices_all
         self.mode = "all"
 
@@ -266,6 +350,7 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
             "action",
             "reward",
             "discount",
+            "value",
             "terminated",
             "truncated",
             "success",
@@ -275,7 +360,11 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
             "segment_type",
             "segment_terminal_reward",
             "segment_end_is_intervention_boundary",
+            "failure_rank",
+            "is_success_segment",
+            "is_failure_segment",
             "k",
+            "cond",
         }
         if self.require_intervention:
             self.available_keys.add("intervention")
@@ -284,6 +373,7 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
         if "actions" in self.required_keys:
             self.required_keys.remove("actions")
             self.required_keys.add("action")
+        self.conds = torch.zeros(len(self.slices_all), dtype=torch.float32) if "cond" in self.required_keys else None
 
         self.agent_control_mode = canonicalize_control_mode(
             getattr(cfg, "agent_control_mode", getattr(cfg.env, "env_control_mode", getattr(cfg.env, "control_mode", "delta_pose")))
@@ -294,7 +384,15 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
         self.is_abs_mode = is_absolute_mode(self.agent_control_mode)
         self.pad_action_arm = torch.zeros((self.action_data[0].shape[1] - 1,)) if not self.is_abs_mode else None
         end_time = time.time()
-        print(f"time: loaded and processed {len(self.slices_all)} CPIQL trajectory slices \n from {len(self.trajectory_refs)} trajectories in {end_time - start_time:.2f} seconds (caching took {end_time - cache_start_time:.2f} seconds), with agent_control_mode={self.agent_control_mode}, env_control_mode={self.env_control_mode}, is_abs_mode={self.is_abs_mode}.")
+        segment_summary = self.segment_counts_by_type()
+        print(
+            f"time: loaded and processed {len(self.slices_all)} CPIQL trajectory slices \n"
+            f" from {len(self.trajectory_refs)} trajectories in {end_time - start_time:.2f} seconds "
+            f"(caching took {end_time - cache_start_time:.2f} seconds), rgb_load_mode={self.rgb_load_mode}, "
+            f"with agent_control_mode={self.agent_control_mode}, "
+            f"env_control_mode={self.env_control_mode}, is_abs_mode={self.is_abs_mode}."
+        )
+        print(f"[CPIQLDataset] segment summary: {segment_summary}")
 
 
     def _normalize_env_meta(self, env_meta: Dict[str, Any]) -> Dict[str, Any]:
@@ -324,19 +422,24 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
         for ref in self.trajectory_refs:
             with h5py.File(ref.file_path, "r") as h5_file:
                 group = h5_file if ref.traj_key is None else h5_file[ref.traj_key]
-                traj = load_flatten_trajectory(h5_file, group, include_rgb=self.include_rgb)
+                traj = load_flatten_trajectory(
+                    h5_file,
+                    group,
+                    include_rgb=self.include_rgb,
+                    lazy_rgb=self.lazy_rgb,
+                )
                 intervention = self._load_intervention(group, len(traj["action"]))
 
             for start_idx, end_idx, segment_type in self._execution_segments(traj, intervention):
                 traj_idx = len(self.action_data)
                 end_is_intervention_boundary = (
-                    segment_type != "intervention"
+                    not _is_intervention_segment_type(segment_type)
                     and end_idx + 1 < len(intervention)
                     and bool(intervention[end_idx + 1])
                 )
                 if (
                     not end_is_intervention_boundary
-                    and segment_type != "intervention"
+                    and not _is_intervention_segment_type(segment_type)
                     and start_idx == 0
                     and end_idx == len(intervention) - 1
                     and _is_external_intervention_boundary(traj.get("boundary_reason", ""))
@@ -353,7 +456,7 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
                 )
 
                 length = len(self.action_data[traj_idx])
-                is_success = self.segment_type_names[traj_idx] == "success"
+                is_success = _is_success_segment_type(self.segment_type_names[traj_idx])
                 pad_before = self.obs_horizon - 1
                 for start in range(-pad_before, length - self.act_horizon + 1):
                     sl = (traj_idx, start, start + self.pred_horizon, global_count)
@@ -373,6 +476,13 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
         end_is_intervention_boundary: bool = False,
     ):
         obs = {key: value[start_idx:end_idx + 1] for key, value in traj["obs"].items()}
+        rgb_source = None
+        if self.include_rgb and self.lazy_rgb and traj.get("rgb_source") is not None:
+            rgb_source = {
+                **dict(traj["rgb_source"]),
+                "segment_start_idx": int(start_idx),
+                "segment_end_idx": int(end_idx),
+            }
         action = traj["action"][start_idx:end_idx + 1]
         success = traj["success"][start_idx:end_idx + 1].copy()
         terminated = traj["terminated"][start_idx:end_idx + 1].copy()
@@ -386,14 +496,14 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
             truncated[:] = False
             terminated[-1] = True
             terminal_reward = self.intervention_terminal_reward
-        elif segment_type == "intervention":
+        elif _is_intervention_segment_type(segment_type):
             terminal_reward = 1.0 if np.any(success) else 0.0
             if terminal_reward > 0.0:
                 success[-1] = True
                 terminated[-1] = True
             elif not np.any(terminated | truncated):
                 truncated[-1] = True
-        elif segment_type == "success":
+        elif _is_success_segment_type(segment_type):
             success[-1] = True
             terminated[-1] = True
             terminal_reward = 1.0
@@ -404,6 +514,7 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
             terminal_reward = 0.0
 
         self.obs_data.append(obs)
+        self.rgb_sources.append(rgb_source)
         self.action_data.append(torch.from_numpy(action).float())
         self.success.append(success)
         self.terminated.append(terminated)
@@ -411,6 +522,8 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
         self.intervention.append(local_intervention)
         self.segment_type_names.append(segment_type)
         self.segment_type_ids.append(SEGMENT_TYPE_TO_ID[segment_type])
+        self.segment_freshness_keys.append(_trajectory_freshness_key(ref.file_path, ref.traj_key, len(self.segment_type_names) - 1))
+        self.failure_ranks.append(1.0)
         self.segment_terminal_rewards.append(float(terminal_reward))
         self.segment_terminal_indices.append(len(action) - 1)
         self.segment_source_refs.append((ref.file_path, ref.traj_key, int(start_idx), int(end_idx)))
@@ -418,12 +531,39 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
         self.env_metas.append(env_meta)
         self._build_progress_signals(len(self.action_data) - 1)
 
+    def _is_success_side_segment(self, traj_idx: int) -> bool:
+        segment_type = self.segment_type_names[traj_idx]
+        return _is_success_segment_type(segment_type) or (
+            _is_intervention_segment_type(segment_type)
+            and float(self.segment_terminal_rewards[traj_idx]) > 0.0
+        )
+
+    def _is_failure_side_segment(self, traj_idx: int) -> bool:
+        return _is_failure_segment_type(self.segment_type_names[traj_idx])
+
+    def _assign_failure_ranks(self):
+        failure_indices = [idx for idx in range(len(self.segment_type_names)) if self._is_failure_side_segment(idx)]
+        self.failure_ranks = [1.0 for _ in self.segment_type_names]
+        if not failure_indices:
+            return
+        if len(failure_indices) == 1:
+            self.failure_ranks[failure_indices[0]] = 1.0
+            return
+
+        ordered = sorted(failure_indices, key=lambda idx: (self.segment_freshness_keys[idx], idx))
+        denom = max(len(ordered) - 1, 1)
+        for rank_idx, segment_idx in enumerate(ordered):
+            self.failure_ranks[segment_idx] = float(rank_idx) / float(denom)
+
     def _execution_segments(self, traj: Dict[str, np.ndarray], intervention: np.ndarray) -> List[Tuple[int, int, str]]:
         length = len(traj["action"])
         if length <= 0:
             return []
-        if not self.require_intervention or not np.any(intervention):
+        if not self.require_intervention:
             segment_type = "success" if np.any(traj["success"]) else "failure"
+            return [(0, length - 1, segment_type)]
+        if not np.any(intervention):
+            segment_type = "success" if np.any(traj["success"]) else "rollout_failure"
             return [(0, length - 1, segment_type)]
 
         segments: List[Tuple[int, int, str]] = []
@@ -452,7 +592,11 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
             return "intervention"
         if np.any(traj["success"][start_idx:end_idx + 1]):
             return "success"
-        return "failure"
+        if end_idx + 1 < len(intervention) and bool(intervention[end_idx + 1]):
+            return "boundary_failure"
+        if np.any(intervention):
+            return "post_intervention_failure"
+        return "rollout_failure" if len(intervention) > 0 else "failure"
 
     def _load_intervention(self, traj_group: h5py.Group, length: int) -> np.ndarray:
         if "intervention" not in traj_group:
@@ -480,12 +624,8 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
             terminal_idx=terminal_idx,
         )
         returns = compute_progress_returns(rewards, gammas)
-        progress_mask = np.ones(length, dtype=np.float32) if segment_type == "success" else np.zeros(length, dtype=np.float32)
-        if self.segment_end_is_intervention_boundary[traj_idx] and bool(cfg_get(self.cfg, "critic.anchor_intervention_pseudo", False)):
-            progress_mask[:] = 1.0
-        progress_weight = progress_mask * self.success_progress_weight
-        if self.segment_end_is_intervention_boundary[traj_idx]:
-            progress_weight *= self.intervention_progress_weight
+        progress_mask = np.ones(length, dtype=np.float32)
+        progress_weight = np.ones(length, dtype=np.float32)
 
         if traj_idx < len(self.rewards):
             self.rewards[traj_idx] = rewards
@@ -530,6 +670,12 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
             if current_type == segment_type
         ]
 
+    def segment_counts_by_type(self) -> Dict[str, int]:
+        counts: Dict[str, int] = {}
+        for segment_type in self.segment_type_names:
+            counts[segment_type] = counts.get(segment_type, 0) + 1
+        return counts
+
     def intervention_boundary_segment_indices(self) -> List[int]:
         return [
             idx for idx, is_boundary in enumerate(self.segment_end_is_intervention_boundary)
@@ -567,19 +713,28 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
     def get_all_actions(self):
         return torch.cat(self.action_data, dim=0)
 
+    def _load_rgb_sequence(self, traj_idx: int, indices: Sequence[int]) -> np.ndarray:
+        rgb_source = self.rgb_sources[traj_idx]
+        if rgb_source is None:
+            raise KeyError(f"Lazy RGB source is not available for traj_idx={traj_idx}.")
+        file_path, traj_key, _segment_start, _segment_end = self.segment_source_refs[traj_idx]
+        absolute_start = int(rgb_source["segment_start_idx"])
+        absolute_indices = [absolute_start + int(idx) for idx in indices]
+        h5_file = self._get_handle(file_path)
+        traj_group = h5_file if traj_key is None else h5_file[traj_key]
+        return _read_rgb_frames(traj_group["obs"], rgb_source, absolute_indices)
+
     def _get_obs_sequence(self, traj_idx: int, start_idx: int, horizon: int) -> Dict[str, torch.Tensor]:
         obs_traj = self.obs_data[traj_idx]
         length = len(next(iter(obs_traj.values())))
         indices = [max(0, min(start_idx - (horizon - 1) + i, length - 1)) for i in range(horizon)]
-        return {key: torch.from_numpy(value[indices]) for key, value in obs_traj.items()}
-
-    def _sample_k(self, traj_idx: int, step_idx: int) -> float:
-        del step_idx
-        if self.segment_type_names[traj_idx] in {"failure", "intervention"} or self.segment_end_is_intervention_boundary[traj_idx]:
-            grid = self.low_k_grid
-        else:
-            grid = self.k_grid
-        return float(grid[np.random.randint(0, len(grid))])
+        obs = {key: torch.from_numpy(value[indices]) for key, value in obs_traj.items()}
+        if self.include_rgb:
+            if "rgb" in obs_traj:
+                obs["rgb"] = torch.from_numpy(obs_traj["rgb"][indices])
+            elif self.lazy_rgb:
+                obs["rgb"] = torch.from_numpy(self._load_rgb_sequence(traj_idx, indices))
+        return obs
 
     def _transform_action_sequence(self, traj_idx: int, start: int, act_seq: torch.Tensor) -> torch.Tensor:
         if self.agent_control_mode == self.env_metas[traj_idx]["env_control_mode"]:
@@ -601,7 +756,7 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
         return torch.from_numpy(transformed).float()
 
     def __getitem__(self, index):
-        traj_idx, start, end, _global_idx = self.slices[index]
+        traj_idx, start, end, global_idx = self.slices[index]
         length = len(self.action_data[traj_idx])
         idx = min(max(0, start), length - 1)
         next_idx = min(idx + self.act_horizon, length - 1)
@@ -629,6 +784,8 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
             data["reward"] = reward.reshape(1)
         if "discount" in self.required_keys:
             data["discount"] = torch.tensor([discount], dtype=torch.float32)
+        if "value" in self.required_keys:
+            data["value"] = torch.tensor([self.progress_returns[traj_idx][idx]], dtype=torch.float32)
         if "terminated" in self.required_keys:
             data["terminated"] = torch.tensor([terminated], dtype=torch.float32)
         if "truncated" in self.required_keys:
@@ -647,12 +804,21 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
             data["segment_terminal_reward"] = torch.tensor([self.segment_terminal_rewards[traj_idx]], dtype=torch.float32)
         if "segment_end_is_intervention_boundary" in self.required_keys:
             data["segment_end_is_intervention_boundary"] = torch.tensor([self.segment_end_is_intervention_boundary[traj_idx]], dtype=torch.float32)
-        if "k" in self.required_keys:
-            data["k"] = torch.tensor([self._sample_k(traj_idx, idx)], dtype=torch.float32)
+        if "failure_rank" in self.required_keys:
+            data["failure_rank"] = torch.tensor([self.failure_ranks[traj_idx]], dtype=torch.float32)
+        if "is_success_segment" in self.required_keys:
+            data["is_success_segment"] = torch.tensor([self._is_success_side_segment(traj_idx)], dtype=torch.float32)
+        if "is_failure_segment" in self.required_keys:
+            data["is_failure_segment"] = torch.tensor([self._is_failure_side_segment(traj_idx)], dtype=torch.float32)
+        if "cond" in self.required_keys and self.conds is not None:
+            data["cond"] = self.conds[global_idx].reshape(1)
         if "intervention" in self.required_keys:
             data["intervention"] = torch.tensor([self.intervention[traj_idx][idx]], dtype=torch.float32)
         if "intervention_segment" in self.required_keys:
-            data["intervention_segment"] = torch.tensor([self.segment_type_names[traj_idx] == "intervention"], dtype=torch.float32)
+            data["intervention_segment"] = torch.tensor(
+                [_is_intervention_segment_type(self.segment_type_names[traj_idx])],
+                dtype=torch.float32,
+            )
         return data
 
     def __len__(self):

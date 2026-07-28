@@ -103,10 +103,18 @@ def build_training_bundle(
         "offline": expert_dataset,
     }
 
-    dataset_mode = str(getattr(cfg.train, "dataset_mode", "expert_dataset"))
+    dataset_key = str(getattr(cfg.train, "dataset_key", "expert_dataset"))
+    valid_dataset_keys = {"expert_dataset", "replaybuffer", "expert_dataset+replaybuffer"}
+    if dataset_key not in valid_dataset_keys:
+        raise ValueError(
+            f"Unsupported train.dataset_key '{dataset_key}'. Expected one of {sorted(valid_dataset_keys)}."
+        )
+
     replaybuffer_path = _resolve_replaybuffer_path(cfg)
-    if dataset_mode == "replaybuffer" and not replaybuffer_path:
-        raise ValueError("dataset_mode='replaybuffer' requires dataset.replaybuffer path.")
+    if dataset_key in {"replaybuffer", "expert_dataset+replaybuffer"} and not replaybuffer_path:
+        raise ValueError(
+            f"train.dataset_key='{dataset_key}' requires dataset.replaybuffer.folder_path or replaybuffer_path."
+        )
     if not replaybuffer_path:
         return bundle
 
@@ -121,13 +129,8 @@ def build_training_bundle(
     bundle["replaybuffer"] = replay_dataset
     bundle["online"] = replay_dataset
 
-    if dataset_mode == "expert_plus_replaybuffer":
+    if dataset_key == "expert_dataset+replaybuffer":
         bundle["expert_dataset+replaybuffer"] = ConcatDataset([expert_dataset, replay_dataset])
-    elif dataset_mode == "replaybuffer":
-        bundle = {
-            "replaybuffer": replay_dataset,
-            "online": replay_dataset,
-        }
 
     return bundle
 

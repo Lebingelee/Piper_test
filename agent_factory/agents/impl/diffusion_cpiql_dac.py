@@ -125,11 +125,16 @@ class DiffusionCPIQLDACAgent(MainMixin, CPIQLDACActorMixin, CPIQLCriticMixin, Ba
         critic_iters = int(getattr(train_cfg, "critic_iters", 0))
         actor_iters = int(getattr(train_cfg, "actor_iters", 0))
         save_dir = self._resolve_save_dir()
-        critic_ckpt_path = str(getattr(train_cfg, "critic_ckpt_path", ""))
+        ckpt_path = str(getattr(train_cfg, "ckpt_path", "")).strip()
 
         os.makedirs(save_dir, exist_ok=True)
         selected_dataset = self._select_dataset_by_key(dataset, dataset_key)
         self._fit_action_normalizer_from_dataset(selected_dataset)
+
+        if ckpt_path:
+            if not os.path.exists(ckpt_path):
+                raise FileNotFoundError(f"CPIQL-DAC checkpoint not found: {ckpt_path}")
+            self.load(ckpt_path)
 
         def _make_loader(ds):
             return DataLoader(
@@ -145,16 +150,18 @@ class DiffusionCPIQLDACAgent(MainMixin, CPIQLDACActorMixin, CPIQLCriticMixin, Ba
             critic_loader = _make_loader(selected_dataset)
             print(f">>> Start CPIQL-DAC Critic Training ({critic_iters} steps) on dataset={dataset_key}")
             self.train_critic_loop(critic_loader, critic_iters, save_dir=save_dir)
-            critic_ckpt_path = critic_ckpt_path or os.path.join(save_dir, "critic_final.pth")
+            ckpt_path = os.path.join(save_dir, "critic_final.pth")
             self.save(
-                critic_ckpt_path,
+                ckpt_path,
                 meta={"phase": "cpiql_dac_critic_train_done", "dataset_key": dataset_key},
             )
             if train_object == "critic":
                 return
 
-        if critic_ckpt_path:
-            self.load(critic_ckpt_path)
+        if train_object == "actor" and not ckpt_path:
+            print(">>> Start CPIQL-DAC Actor Training from randomly initialized weights (train.ckpt_path is empty).")
+        elif train_object == "critic_then_actor" and ckpt_path:
+            self.load(ckpt_path)
 
         actor_dataset = selected_dataset
         actor_loader = _make_loader(actor_dataset)

@@ -29,14 +29,13 @@ train:
   device: cuda:0
   batch_size: 24
   num_workers: 20
-  n_epochs: 1000
   save_interval: 15000
   train_object: critic_then_actor
-  dataset_mode: expert_dataset
   dataset_key: expert_dataset
   critic_iters: 8000
   actor_iters: 60000
-  critic_ckpt_path: ''
+  ckpt_path: ''
+  finetune: false
   save_root: run_results
   exp_name: piper_dual_merged_cpiql_dac
 dataset:
