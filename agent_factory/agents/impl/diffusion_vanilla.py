@@ -1,5 +1,8 @@
-import torch
+import os
 from dataclasses import dataclass
+
+import torch
+
 from agent_factory.agents.base_agent import BaseAgent
 from agent_factory.agents.mixins.actor.diffusion import DiffusionActorMixin
 from agent_factory.agents.registry import register_agent
@@ -33,13 +36,18 @@ class DiffusionVanillaAgent(MainMixin, DiffusionActorMixin, BaseAgent):
         # 优化器已在 Mixin 的 _build_actor 中初始化
         pass
 
+    def _resolve_save_dir(self):
+        train_cfg = self.cfg.train
+        save_root = str(getattr(train_cfg, "save_root", "") or "run_results")
+        exp_name = str(getattr(train_cfg, "exp_name", "") or self.cfg.agent_type)
+        return os.path.join(save_root, exp_name), exp_name
+
     def train_loop(self, dataloader, num_steps, save_dir=""):
         from tqdm import tqdm
-        import os
         self.train()
         
         # 设定保存频率：默认保存 4 次
-        run_save_interval = num_steps // 4
+        run_save_interval = max(num_steps // 4, 1)
         
         desc = "Train DIFFUSION (Vanilla)"
         pbar = tqdm(range(num_steps), desc=desc, leave=True)
@@ -78,16 +86,12 @@ class DiffusionVanillaAgent(MainMixin, DiffusionActorMixin, BaseAgent):
 
     def start_train(self, dataset, additional_args=None):
         from torch.utils.data import DataLoader
-        import os
 
         cfg = self.cfg
-        cfg_sp = self.cfg.agent_sp
         expert_dataset = dataset['offline']
 
-        if cfg_sp.exp_name == "":
-            cfg_sp.exp_name = cfg.agent_type
-           
-        checkpoint_dir = os.path.join(cfg_sp.save_dir, cfg_sp.exp_name)
+        checkpoint_dir, exp_name = self._resolve_save_dir()
+        os.makedirs(checkpoint_dir, exist_ok=True)
 
         # 统一拟合动作归一化器（若配置启用）
         self._fit_action_normalizer_from_dataset(expert_dataset)
@@ -102,9 +106,10 @@ class DiffusionVanillaAgent(MainMixin, DiffusionActorMixin, BaseAgent):
             pin_memory=(cfg.train.num_workers > 0)
         )
 
-        print(f">>> Start Vanilla Diffusion Policy Training ({cfg_sp.iters} steps)")
-        self.train_loop(loader, cfg_sp.iters, save_dir=checkpoint_dir)
+        actor_iters = int(getattr(cfg.train, "actor_iters", 0))
+        print(f">>> Start Vanilla Diffusion Policy Training ({actor_iters} steps)")
+        self.train_loop(loader, actor_iters, save_dir=checkpoint_dir)
 
         # 保存最终模型
-        ckpt_path = os.path.join(checkpoint_dir, f"{cfg_sp.exp_name}_final.pth")
+        ckpt_path = os.path.join(checkpoint_dir, f"{exp_name}_final.pth")
         self.save(ckpt_path, meta={"phase": "vanilla_train_done"})

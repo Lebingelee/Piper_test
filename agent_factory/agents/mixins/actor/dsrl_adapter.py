@@ -7,6 +7,7 @@ import torch
 from omegaconf import OmegaConf
 
 from agent_factory.agents.registry import make_agent
+from agent_factory.config.resolution import general_resolve
 
 
 class GroupRLDiffusionPolicyAdapter:
@@ -40,15 +41,17 @@ class GroupRLDiffusionPolicyAdapter:
             raise ValueError(f"DSRL base_policy.base_config_path not found: {base_config_path}")
         agent_cfg = OmegaConf.load(base_config_path)
 
-        if "device" in agent_cfg:
-            agent_cfg.device = str(self.device)
-
         agent_type = getattr(self.cfg, "type", "").strip()
         if not agent_type:
             raise ValueError("DSRL base policy requires agent_sp.base_policy.type.")
         
-        # Registry should work here
-        self.agent = make_agent(agent_type, agent_cfg)
+        if not OmegaConf.select(agent_cfg, "agent_type", default=""):
+            agent_cfg.agent_type = agent_type
+        resolved_cfg, _runtime_spec = general_resolve(
+            override_config={"device": str(self.device)},
+            file_config=agent_cfg,
+        )
+        self.agent = make_agent(agent_type, resolved_cfg)
         self.agent.load(checkpoint_path)
         self.agent.to(self.device)
         self.agent.eval()

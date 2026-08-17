@@ -1,0 +1,5 @@
+hitl_enabled: true
+hitl_override_key: t
+hitl_teleop_key: t
+hitl_source: keyboard
+hitl_finalize_intervention: true

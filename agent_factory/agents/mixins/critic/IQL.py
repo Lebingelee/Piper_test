@@ -6,15 +6,14 @@ from tqdm import tqdm
 from typing import Dict, Literal, Optional
 
 # 引用组件
+from agent_factory.agents.mixins.module_builder import ModuleBuilderMixin
 from agent_factory.modules.critics.iql_critic import IQLQNet, IQLVNet
 from agent_factory.modules.critics.itqc_critic import MultiHeadQuantileNet
-from agent_factory.modules.encoders.visual_encoder import VisualEncoder
-from agent_factory.modules.encoders.state_encoder import BaseStateEncoder
 
 from agent_factory.config.structure import IQLCriticConfig
 
 
-class IQLCriticMixin:
+class IQLCriticMixin(ModuleBuilderMixin):
     """
     IQL Critic 逻辑：
     - 维护 Q1, Q2, V, Target_Q1, Target_Q2 (注意：IQL 标准实现通常用 Target Q 计算 V Loss 的目标)
@@ -25,32 +24,13 @@ class IQLCriticMixin:
     CONFIG_KEY = "critic"
 
     REQUIRED_KEYS = {
-        "observations", "action", "next_observations", "reward", "terminated"
+        "observations", "action", "next_observations", "reward", "terminated", "discount"
     }
 
     def _build_critic(self):
+        self._resolve_critic_default_gamma()
         cfg = self.cfg.critic
-        encoder_cfg = cfg.encoder
-        use_visual = getattr(self.cfg.dataset, "include_rgb", True)
-        
-        # 1. 初始化 Encoder
-        vis_enc = None
-        if use_visual:
-            vis_enc = VisualEncoder(
-                in_channels=encoder_cfg.visual.in_channels,
-                out_dim=encoder_cfg.visual.out_dim,
-                backbone_type=encoder_cfg.visual.backbone_type,
-                pool_feature_map=encoder_cfg.visual.pool_feature_map,
-                use_group_norm=encoder_cfg.visual.use_group_norm,
-            )
-        proprio_dim = encoder_cfg.proprio_dim or self.cfg.env.proprio_dim
-        self.critic_encoder = BaseStateEncoder(
-            visual_encoder=vis_enc,
-            proprio_dim=proprio_dim,
-            out_dim=encoder_cfg.out_dim,
-            num_cameras=self.cfg.env.num_cameras,
-            view_fusion=encoder_cfg.view_fusion,
-        )
+        self.critic_encoder = self._build_encoder_from_config(cfg.encoder)
         
         # 2. 初始化网络
         common_args = dict(
@@ -76,6 +56,29 @@ class IQLCriticMixin:
         self.v_optimizer = torch.optim.AdamW(self.v_net.parameters(), lr=cfg.v_lr)
         self.q_optimizer = torch.optim.AdamW(self.q_net.parameters(), lr=cfg.q_lr)
 
+    def _resolve_critic_default_gamma(self) -> float:
+        raw_gamma = getattr(self.cfg.env, "gamma", 0.99)
+        if isinstance(raw_gamma, str):
+            raw_gamma = raw_gamma.strip().lower()
+        if raw_gamma == "default":
+            mode = str(getattr(self.cfg.critic, "gamma_default_mode", "one_minus_margin_over_max_episode_steps"))
+            if mode != "one_minus_margin_over_max_episode_steps":
+                raise ValueError(f"Unsupported IQL gamma_default_mode={mode!r}.")
+            max_steps = max(float(getattr(self.cfg.env, "max_episode_steps", 1) or 1), 1.0)
+            margin = float(getattr(self.cfg.critic, "gamma_default_margin", 2.0))
+            gamma = max(0.0, min(1.0, 1.0 - margin / max_steps))
+            self.cfg.env.gamma = gamma
+        else:
+            gamma = float(raw_gamma)
+            self.cfg.env.gamma = gamma
+        self.critic_step_gamma = gamma
+        self.critic_discount_gamma = (
+            gamma ** int(getattr(self.cfg.env, "act_horizon", 1))
+            if bool(getattr(self.cfg.critic, "gamma_use_act_horizon_power", True))
+            else gamma
+        )
+        return gamma
+
     def soft_update_target(self):
         tau = self.cfg.soft_update_tau
         for param, target_param in zip(self.q_net.parameters(), self.target_q_net.parameters()):
@@ -89,6 +92,11 @@ class IQLCriticMixin:
         # IQL 不使用 terminated 来 mask target value? 
         # 通常: target = r + gamma * V(s') * (1-done)
         terminated = batch['terminated'].to(self.device).float()
+        discount = batch.get("discount")
+        if discount is not None:
+            discount = discount.to(self.device).float()
+        else:
+            discount = torch.full_like(terminated, float(getattr(self, "critic_discount_gamma", self.cfg.env.gamma)))
         
         # --- 1. V Loss (Expectile) ---
         # L = |tau - I(min(Q_targ) - V < 0)| * (min(Q_targ) - V)^2
@@ -110,7 +118,7 @@ class IQLCriticMixin:
         # Target = r + gamma * V(s')
         with torch.no_grad():
             next_v = self.v_net(next_obs)
-            q_target_val = reward + self.cfg.env.gamma * next_v * (1.0 - terminated)
+            q_target_val = reward + discount * next_v * (1.0 - terminated)
         
         q1_pred, q2_pred = self.q_net(obs, actions)
         q_loss = F.mse_loss(q1_pred, q_target_val) + F.mse_loss(q2_pred, q_target_val)

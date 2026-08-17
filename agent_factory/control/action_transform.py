@@ -159,6 +159,10 @@ def _default_arm_entries(env_meta: Optional[Dict[str, Any]]) -> List[Dict[str, A
         }
         if state_pose_key is not None:
             entry["state_pose_key"] = state_pose_key
+        elif action_key == "arm":
+            entry["state_pose_key"] = control_meta.get("eef_pose_key")
+            entry["eef_pos_key"] = control_meta.get("eef_pos_key")
+            entry["eef_quat_key"] = control_meta.get("eef_quat_key")
         entries.append(entry)
 
     if entries:
@@ -305,6 +309,7 @@ def _require_supported(agent_mode: str, env_mode: str):
     supported = {
         (ABSOLUTE_JOINT, ABSOLUTE_JOINT),
         (ABSOLUTE_POSE, ABSOLUTE_POSE),
+        (DELTA_POSE, DELTA_POSE),
         (DELTA_POSE, ABSOLUTE_POSE),
     }
     if (agent_mode, env_mode) not in supported:

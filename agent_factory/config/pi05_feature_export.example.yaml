@@ -1,0 +1,19 @@
+# Resolve this configuration with agent_factory.config.resolution.general_resolve
+# before calling export_pi05_features.py.  Keep all π₀.₅-specific settings in
+# actor; env and runner remain their shared public contracts.
+agent_type: pi05
+device: cuda:0
+env:
+  # These are the uniform contract of one selected multi-task dataset, not
+  # universal π₀.₅ constants. Replace them for each training/export suite.
+  proprio_dim: 23
+  action_dim: 7
+  pred_horizon: 50
+actor:
+  mock_mode: false
+  pretrained_path: /path/on/server/to/lerobot/pi05_checkpoint
+  local_files_only: true
+  image_keys: [agentview, robot0_eye_in_hand]
+  feature_pooling: last_language_token
+agent_sp:
+  exp_name: pi05_feature_export

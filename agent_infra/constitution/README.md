@@ -13,7 +13,7 @@
 
 `agent_infra` 的唯一核心使命是提供可复用的机器人环境、任务环境、数据采集、数据回放和硬件抽象。
 
-`agent_infra` **MUST** 以环境契约为中心，而不是以某个算法为中心。Piper、Realman、robomimic task env 或后续任何机器人环境，都必须通过统一的 Gymnasium 风格接口、`meta_keys`、raw trajectory 数据格式和可选 wrapper 与上层算法库连接。
+`agent_infra` **MUST** 以环境契约为中心，而不是以某个算法为中心。Piper、Realman、Robosuite 仿真环境或后续任何机器人环境，都必须通过统一的 Gymnasium 风格接口、`meta_keys`、raw trajectory 数据格式和可选 wrapper 与上层算法库连接。
 
 `agent_infra` **MUST NOT** 实现算法训练循环、神经网络模块、actor/critic 更新、RL 损失函数、模型 checkpoint 管理或算法专用 replay buffer。这些属于 `agent_factory`。
 
@@ -78,15 +78,15 @@ action/<action_key>
 
 脚本 **MUST** 尽量通过配置文件和命令行参数选择硬件，不得把机器特定 CAN、IP、serial number 硬编码进 Python 逻辑。
 
-### 2.7 `agent_infra/robomimic_env/`
+### 2.7 `agent_infra/robosuite_env/`
 
-`agent_infra/robomimic_env/` 的定位是：把 robomimic 中的任务环境接入本项目的环境构建体系，用本项目设计的算法在 robomimic task env 中测试。
+`agent_infra/robosuite_env/` 的定位是：把 Robosuite 仿真器接入本项目的环境构建体系，用本项目设计的算法在 Robosuite task env 中测试。
 
-该目录 **MUST** 实现 robomimic task env 到 `BaseRobotEnv` / Gymnasium 风格接口 / `meta_keys` 的适配。
+该目录 **MUST** 实现 Robosuite task env 到 `BaseRobotEnv` / Gymnasium 风格接口 / `meta_keys` 的适配。
 
-该目录 **MUST NOT** 适配 robomimic 算法到本项目。robomimic 算法训练、robomimic checkpoint、robomimic policy wrapper 若后续需要，属于 `agent_factory/integrations/` 或单独实验目录。
+该目录 **MUST NOT** 适配 robomimic 算法到本项目。robomimic 基于 Robosuite 等任务环境提供算法和数据生态，但本目录只接 Robosuite 仿真环境。robomimic 算法训练、robomimic checkpoint、robomimic policy wrapper 若后续需要，属于 `agent_factory/integrations/` 或单独实验目录。
 
-该目录 **MUST** 把 robomimic task env 当作一种环境来源，而不是把整个项目迁移到 robomimic 的算法体系。
+该目录 **MUST** 把 Robosuite task env 当作一种环境来源，而不是把整个项目迁移到 robomimic 的算法体系。
 
 ## 3. 环境分层规则
 
@@ -141,39 +141,9 @@ teleop/HITL env **MUST** 负责：
 - `info["intervened"]` 与 `info["intervened_map"]`。
 - `info["action_type"]` 与 `info["action_type_map"]`。
 
+仿真环境若不支持 human in the loop，**MAY** 不提供 `under_control`、`intervened_map` 和专家动作覆盖逻辑。此时 runner **MUST** 将其视为纯 policy 环境，而不是强制补造专家介入信号。
+
 teleop/HITL env **MUST NOT** 把算法策略、训练 loop 或 loss 写进环境层。
-
-## 3.1 环境状态接口契约
-
-环境自身状态 **MUST** 通过统一的 switch/read 接口管理。对外写状态只允许使用 `switch_*` 方法；对外读状态只允许使用 `get_env_state()`。
-
-`BaseRobotEnv` **MUST** 提供：
-
-- `get_env_state() -> dict`
-- `get_env_state("teleop") -> bool`
-- `get_env_state("passive") -> bool`
-- `get_env_state("master_follow") -> bool`
-- `switch_passive(mode="toggle") -> bool`
-- `switch_tele(mode="toggle") -> bool`
-- `switch_master_follow(mode="toggle") -> bool`
-
-`mode` **MUST** 支持：
-
-- 缺省、`None` 或 `"toggle"`：切换当前状态。
-- `True` / `False`：强制设置目标状态。
-- `"true"` / `"false"`、`"1"` / `"0"`、`"on"` / `"off"`、`"yes"` / `"no"`、`"enable"` / `"disable"`：强制设置目标状态。
-
-状态读取的 canonical key **MUST** 使用：
-
-- `"teleop"`：是否处于遥操/专家接管状态。
-- `"passive"`：是否允许环境真实下发动作。
-- `"master_follow"`：policy 阶段主臂是否跟随从臂。
-
-环境实现 **MUST NOT** 要求上层直接读写 `tele_enabled`、`passive`、`master_follow` 等内部属性。Runner、Recorder、Replay、Script 若需要修改状态，必须调用对应 `switch_*`；若需要读取状态，必须调用 `get_env_state()`。
-
-机器人环境 **MAY** 覆盖 `switch_*` 方法以加入硬件副作用。例如 Piper 的 `switch_tele()` 在进入遥操时释放主臂，在退出遥操时按需恢复 `master_follow`；Piper 的 `switch_master_follow()` 会按需切换主臂 policy 跟随模式。
-
-PiperEnv **MUST NOT** 自己拥有键盘监听器。`t`、`i`、`s`、`e`、`q` 等按键监听必须位于 `Record/`、`Script/` 或 `agent_factory/runner` 等上层调用者；这些调用者通过 `switch_tele()`、`switch_passive()`、`switch_master_follow()` 操作环境状态。
 
 ## 4. `meta_keys` 契约
 
@@ -262,7 +232,7 @@ LeRobot 与 H5 之间的转换 **MAY** 存在于 `Record/postprocess.py`，但�
 
 ### 5.4 第三方环境数据
 
-robomimic task env、仿真环境或后续第三方任务环境的数据 **MUST** 先适配到本项目环境契约。是否写入 H5 由实验需要决定。
+Robosuite task env、其他仿真环境或后续第三方任务环境的数据 **MUST** 先适配到本项目环境契约。是否写入 H5 由实验需要决定。
 
 若第三方环境原生数据格式与本项目不同，适配层 **MUST** 明确：
 
@@ -299,8 +269,6 @@ robomimic task env、仿真环境或后续第三方任务环境的数据 **MUST*
 - `observation_space`
 - `meta_keys`
 - `get_safe_action`
-- `get_env_state(key=None)`
-- `switch_passive(mode="toggle")` for real hardware envs
 
 HITL 环境 **MUST** 在 `info` 中提供执行动作和接管信号：
 
@@ -320,11 +288,6 @@ runner **MUST NOT** 调用机器人私有 SDK、私有 CAN/IP 逻辑或相机私
 硬件安全规则 **SHOULD** 由具体硬件 env 实现，但以下原则为全局要求：
 
 - 所有真实硬件 env **MUST** 提供 `get_safe_action`。
-- 所有真实硬件 env **MUST** 提供动作下发安全锁 `switch_passive(mode="toggle")`。
-- `switch_passive("true")` **MUST** 表示允许 `step()` 中的动作真正下发到硬件。
-- `switch_passive("false")` 或默认未开启状态 **MUST** 表示 `step()` 仍可执行频率控制、观测读取和 `info` 构建，但不得调用底层硬件动作下发接口。
-- 动作下发安全锁 **MUST** 位于环境内部最终硬件 dispatch 边界，例如 `_apply_action()`，并覆盖 policy、safe action、teleop/HITL 覆盖后的动作等所有 `step()` 动作来源。
-- 动作下发安全锁 **MUST NOT** 被 runner、agent、dataset 或算法层绕过；上层只能通过 `env.unwrapped.switch_passive(...)` 显式开启或关闭。
 - replay 脚本 **MUST** 支持从首帧状态 reset 或显式声明不 reset。
 - 真实硬件动作下发 **SHOULD** 有控制频率限制。
 - 真实硬件 reset **SHOULD** 支持配置化初始位姿。
@@ -343,7 +306,7 @@ runner **MUST NOT** 调用机器人私有 SDK、私有 CAN/IP 逻辑或相机私
 - 把机器特定 CAN、IP、camera serial 硬编码到生产 Python 模块。
 - 覆盖 raw trajectory。
 - 在无 `meta_keys` 更新的情况下新增 obs/action 字段。
-- 在 `robomimic_env` 中实现 robomimic 算法适配。
+- 在 `robosuite_env` 中实现 robomimic 算法适配。
 
 ## 10. 新环境接入检查表
 
@@ -359,3 +322,4 @@ runner **MUST NOT** 调用机器人私有 SDK、私有 CAN/IP 逻辑或相机私
 - 是否说明 LeRobot 数据流是否支持。
 - 是否说明与 runner 的交互方式。
 - 是否未引入算法层依赖。
+

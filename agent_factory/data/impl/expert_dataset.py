@@ -244,10 +244,10 @@ class ExpertDataset(BaseTrajectoryDataset):
         }
 
     def _load_env_meta(self, h5_file: h5py.File, traj_group: h5py.Group) -> Dict[str, Any]:
-        if "meta" in h5_file and "env_meta" in h5_file["meta"]:
-            return _read_json_dataset(h5_file["meta"]["env_meta"])
         if "meta" in traj_group and "env_meta" in traj_group["meta"]:
             return _read_json_dataset(traj_group["meta"]["env_meta"])
+        if "meta" in h5_file and "env_meta" in h5_file["meta"]:
+            return _read_json_dataset(h5_file["meta"]["env_meta"])
         if "meta_keys" in traj_group:
             return _read_json_dataset(traj_group["meta_keys"])
         raise KeyError(

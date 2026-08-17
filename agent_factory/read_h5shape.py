@@ -52,12 +52,29 @@ def build_h5_dataset_dict(file_path, keywords=None):
 def inspect_h5_keywords(file_path, keywords):
     return build_h5_dataset_dict(file_path, keywords)
 
+
+def _print_success_tail(dataset):
+    for key in ("success", "traj_0000/success", "traj_0/success"):
+        if key in dataset:
+            values = np.asarray(dataset[key]).reshape(-1)
+            if values.size:
+                print(f"\nLast success flag ({key}): {values[-1]}")
+            return
+    success_keys = sorted(key for key in dataset if key.endswith("/success"))
+    if success_keys:
+        key = success_keys[0]
+        values = np.asarray(dataset[key]).reshape(-1)
+        if values.size:
+            print(f"\nLast success flag ({key}): {values[-1]}")
+    else:
+        print("\nNo success dataset found.")
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Inspect shapes of datasets in an .h5 file whose keys contain given keywords."
     )
     parser.add_argument("-p","--file_path", type=str, 
-                        default='data/Rollout_cpiql/group_1/traj_4_0514_2349.h5',
+                        default='agent_infra/robosuite_env/Record/data/robosuite_square_h5_rgb_absolute_pose_task/h5_raw/traj_0_163533.h5',
                         help="Path to the .h5 file")
     parser.add_argument(
         "-k", "--keywords",
@@ -78,5 +95,5 @@ if __name__ == "__main__":
     #   dataset["traj_0000/action"][0]
     #   dataset_attrs["traj_0000/action"]
     #   file_attrs
-    print(dataset['traj_0000/success'][-1])
+    _print_success_tail(dataset)
     print(f"\nLoaded {len(dataset)} datasets into variable `dataset`.")

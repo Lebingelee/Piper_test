@@ -7,7 +7,7 @@ from typing import List, Optional, Any, Dict
 class VisualEncoderConfig:
     in_channels: int = 3
     out_dim: int = 256
-    backbone_type: str = "plain"  # 'plain' or 'resnet'
+    backbone_type: str = 'resnet'#  # 'plain' or 'resnet'
     pool_feature_map: bool = True
     use_group_norm: bool = True
 
@@ -16,9 +16,14 @@ class StateEncoderConfig:
     """
     StateEncoder 现在作为 Actor/Critic 的子组件存在
     """
+    type: str = "CNN_state_encoder"
+    include_rgb: bool = True
     visual: VisualEncoderConfig = field(default_factory=VisualEncoderConfig)
     proprio_dim: int = 0
     out_dim: int = 256  # 融合后的 embedding 维度
+    obs_key: str = "feature"
+    hidden_dims: List[int] = field(default_factory=lambda: [256])
+    num_cameras: int = 1
     view_fusion: str = "concat"  # 'concat' or 'mean'
 
 @dataclass
@@ -96,6 +101,87 @@ class DiffusionActorConfig(BaseActorConfig):
 
 
 @dataclass
+class FlowMatchingActorConfig(BaseActorConfig):
+    type: str = "flow_matching"
+    lr: float = 1e-4
+    weight_decay: float = 1e-6
+
+    # SmolVLA-style flow matching controls.
+    num_inference_steps: int = 10
+    time_beta_alpha: float = 1.5
+    time_beta_beta: float = 1.0
+    time_eps: float = 1e-3
+    time_embed_scale: float = 100.0
+    clip_sample: bool = True
+
+    unet: UNetConfig = field(default_factory=UNetConfig)
+    encoder: StateEncoderConfig = field(default_factory=StateEncoderConfig)
+
+
+@dataclass
+class Pi05ActorConfig(BaseActorConfig):
+    """LeRobot π₀.₅-specific actor settings.
+
+    Public environment/runner schemas stay unchanged.  The resolver derives
+    ``state_dim`` and ``action_dim`` from the selected environment contract;
+    the remaining fields describe the selected π₀.₅ checkpoint and prefix
+    feature representation.
+    """
+
+    type: str = "pi05"
+    norm: NormalizationConfig = field(default_factory=lambda: NormalizationConfig(type=None))
+    pretrained_path: str = ""
+    pretrained_revision: Optional[str] = None
+    local_files_only: bool = True
+    mock_mode: bool = True
+    strict_load: bool = True
+    state_dim: int = 0
+    feature_dim: int = 2048
+    max_state_dim: int = 32
+    max_action_dim: int = 32
+    chunk_size: int = 50
+    n_action_steps: int = 50
+    num_inference_steps: int = 10
+    image_keys: List[str] = field(default_factory=list)
+    prompt_key: str = "prompt"
+    state_key: str = "observation.state"
+    action_key: str = "action"
+    feature_pooling: str = "last_language_token"
+
+
+@dataclass
+class SmolVLAActorConfig(BaseActorConfig):
+    type: str = "smolvla"
+    norm: NormalizationConfig = field(default_factory=lambda: NormalizationConfig(type="mean_std"))
+    obs_norm: NormalizationConfig = field(default_factory=lambda: NormalizationConfig(type="mean_std"))
+    pretrained_path: str = (
+        "/home/lilinyi/.cache/huggingface/hub/models--lerobot--smolvla_base/"
+        "snapshots/c83c3163b8ca9b7e67c509fffd9121e66cb96205"
+    )
+    pretrained_revision: Optional[str] = None
+    local_files_only: bool = True
+    strict_load: bool = False
+    lr: float = 1e-4
+    weight_decay: float = 1e-10
+    max_state_dim: int = 32
+    max_action_dim: int = 32
+    chunk_size: int = 50
+    n_action_steps: int = 50
+    num_inference_steps: int = 10
+    image_keys: List[str] = field(default_factory=lambda: ["agentview", "robot0_eye_in_hand"])
+    image_shape: List[int] = field(default_factory=lambda: [3, 256, 256])
+    prompt_key: str = "prompt"
+    state_key: str = "observation.state"
+    action_key: str = "action"
+    tokenizer_max_length: int = 48
+    freeze_vision_encoder: bool = True
+    train_expert_only: bool = True
+    train_state_proj: bool = True
+    load_vlm_weights: bool = True
+    normalization_source: str = "agent_factory"  # agent_factory | none
+
+
+@dataclass
 class Conditional_DiffusionActorConfig(DiffusionActorConfig):
     type: str = "conditional_diffusion"  # 这里的 type 主要用于序列化标识
     # Conditional Logic
@@ -119,6 +205,11 @@ class IQLCriticConfig(BaseCriticConfig):
     q_lr: float = 3e-4
     v_lr: float = 3e-4
     expectile: float = 0.7
+    return_mse_weight: float = 1.0
+    gamma_default_mode: str = "one_minus_margin_over_max_episode_steps"
+    gamma_default_margin: float = 2.0
+    gamma_use_act_horizon_power: bool = True
+    log_interval: int = 100
 
 
 @dataclass
@@ -137,8 +228,8 @@ class DSRLCriticConfig(BaseCriticConfig):
 
 @dataclass
 class EnvConfig:
-    env_id: str = "StackCube-v1"
-    library: str = "mani_skill"
+    env_id: str = ""
+    library: str = ""
     env_config_path: str = ""
     action_dim: int = 7
     proprio_dim: int = 25
@@ -157,10 +248,12 @@ class EnvConfig:
     render_mode: str = "rgb_array"
     max_episode_steps: int = 150
 
-    gamma: float = 0.99
+    gamma: Any = 0.99
     penalty: float = -150.0
     reward_scale: int = 100
     reward_shape: bool = False
+    flatten_obs_obj: Any = field(default_factory=lambda: ["all"])
+    flatten_action: bool = True
 
 
 @dataclass
@@ -183,6 +276,7 @@ class ExpertDatasetConfig:
     demo_path: str = "data/demos/expert_data.hdf5"
     num_traj: Optional[int] = None  # None 表示加载全部轨迹
     format: str = "flat"  # flat | structured | auto
+    success_only: bool = False
 
 @dataclass
 class ReplayBufferConfig:
@@ -192,26 +286,23 @@ class ReplayBufferConfig:
 
 @dataclass
 class RunnerConfig:
+    type: str = "base"
     control_hz: int = 10
     buffer_capacity: int = 100
     redundancy_margin: int = 100
     save_dir: str = "data"
-    hitl_enabled: bool = False
-    hitl_override_key: str = "t"
-    hitl_source: str = "keyboard"  # reserved: keyboard / hardware
-    hitl_finalize_intervention: bool = True
     no_safe_action_gap: bool = False
     planning_wait_sleep: float = 0.002
-    risk_check_hz: float = 0.0
-    risk_use_safe_action: bool = True
-    deploy_continue_key: str = "c"
-    deploy_save_key: str = "s"
+    config_path: str = "agent_factory/runner/config/base.yaml"
+    config: Dict[str, Any] = field(default_factory=dict)
 
 @dataclass
 class DatasetConfig:
     dataset_type: str = "cpiql"
     include_rgb: bool = True
     include_depth: bool = False
+    config_path: str = ""
+    config: Dict[str, Any] = field(default_factory=dict)
     expert: ExpertDatasetConfig = field(default_factory=ExpertDatasetConfig)
     replaybuffer: ReplayBufferConfig = field(default_factory=ReplayBufferConfig)
     replay: ReplayBufferConfig = field(default_factory=ReplayBufferConfig)
@@ -226,6 +317,7 @@ class GlobalConfig:
     实际构建时会被 registry 替换为具体的子类 (如 DiffusionActorConfig)。
     """
     agent_type: str = "unknown"
+    resolved: bool = False
     agent_control_mode: str = "delta_pose"
     device: str = "cuda"
     seed: int = 42

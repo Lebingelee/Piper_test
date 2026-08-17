@@ -33,8 +33,8 @@ class IQLQNet(nn.Module):
         # 根据 recap_agent_ITQC.py，MultiHeadQuantileNet use_action 时输入了 pred_horizon * act_dim。
         # 我们这里保持灵活，由外部配置决定。
         
-        self.q1 = make_mlp(input_dim, hidden_dims + [1], last_act=False)
-        self.q2 = make_mlp(input_dim, hidden_dims + [1], last_act=False)
+        self.q1 = make_mlp(self.input_dim, hidden_dims + [1], last_act=False)
+        self.q2 = make_mlp(self.input_dim, hidden_dims + [1], last_act=False)
 
     def forward(self, obs_dict: Dict, actions: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """

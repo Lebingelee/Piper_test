@@ -6,16 +6,34 @@ import torch
 from torch.nn.utils import clip_grad_norm_
 
 from agent_factory.config.structure import DSRLActorConfig
+from agent_factory.agents.mixins.module_builder import ModuleBuilderMixin
 from .dsrl_adapter import GroupRLDiffusionPolicyAdapter
 from agent_factory.modules.actors.dsrl_policy import DSRLNoisePolicy
 from agent_factory.modules.utils.temperature import Temperature
-from agent_factory.modules.encoders.state_encoder import BaseStateEncoder
-from agent_factory.modules.encoders.visual_encoder import VisualEncoder
 
 
-class DSRLActorMixin:
+class DSRLActorMixin(ModuleBuilderMixin):
     CONFIG_CLASS = DSRLActorConfig
     CONFIG_KEY = "actor"
+    RESOLVE_RULES = {
+        "action_dim": {
+            "source": "env.action_dim",
+            "kind": "derived",
+            "required": True,
+        },
+    }
+    VALIDATION_RULES = {
+        "obs_horizon": {
+            "source": "env.obs_horizon",
+            "kind": "protocol",
+            "on_conflict": "warn",
+        },
+        "pred_horizon": {
+            "source": "env.pred_horizon",
+            "kind": "protocol",
+            "on_conflict": "warn",
+        },
+    }
     REQUIRED_KEYS = {"observations", "discount"}
     _LOG_PROB_CLAMP = 1e6
     _ACTOR_GRAD_CLIP = 10.0
@@ -27,8 +45,6 @@ class DSRLActorMixin:
 
     def _build_actor(self):
         cfg: DSRLActorConfig = self.cfg.actor
-        encoder_cfg = cfg.encoder
-        use_visual = getattr(self.cfg.dataset, "include_rgb", True)
 
         self.noise_action_dim = int(cfg.action_dim)
         self.noise_pred_horizon = int(cfg.pred_horizon)
@@ -39,24 +55,7 @@ class DSRLActorMixin:
                 "Please ensure base policy noise domain matches this scale."
             )
 
-        visual_encoder = None
-        if use_visual:
-            visual_encoder = VisualEncoder(
-                in_channels=encoder_cfg.visual.in_channels,
-                out_dim=encoder_cfg.visual.out_dim,
-                backbone_type=encoder_cfg.visual.backbone_type,
-                pool_feature_map=encoder_cfg.visual.pool_feature_map,
-                use_group_norm=encoder_cfg.visual.use_group_norm,
-            )
-
-        proprio_dim = encoder_cfg.proprio_dim or self.cfg.env.proprio_dim
-        self.actor_encoder = BaseStateEncoder(
-            visual_encoder=visual_encoder,
-            proprio_dim=proprio_dim,
-            out_dim=encoder_cfg.out_dim,
-            num_cameras=self.cfg.env.num_cameras,
-            view_fusion=encoder_cfg.view_fusion,
-        )
+        self.actor_encoder = self._build_encoder_from_config(cfg.encoder)
         self.actor = DSRLNoisePolicy(
             state_encoder=self.actor_encoder,
             obs_horizon=cfg.obs_horizon,

@@ -8,10 +8,15 @@ def get_action_normalizer(norm_type: str, action_dim: int, **kwargs) -> ActionNo
     归一化工厂方法。
     
     Args:
-        norm_type: 'min_max', 'mean_std', 'quantile', or None
+        norm_type: 'min_max', 'mean_std', 'quantile', None, 'none', 'null', or 'identity'
         action_dim: 动作维度
         **kwargs: 算法特定参数 (如 quantile 的 q_low/q_high)
     """
+    if isinstance(norm_type, str):
+        norm_type = norm_type.strip().lower()
+
+    if norm_type in {None, "", "none", "null", "identity"}:
+        return ActionNormalizer()
     if norm_type == "min_max":
         return MinMaxNormalizer(action_dim)
     elif norm_type == "mean_std":

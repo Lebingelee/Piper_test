@@ -13,6 +13,7 @@ import numpy as np
 import torch
 from omegaconf import DictConfig, OmegaConf
 
+from agent_factory.runner.config_utils import runner_config_get
 from agent_factory.runner.hitl_runner import HITLRunner
 
 
@@ -36,15 +37,27 @@ class HITLDeployRunner(HITLRunner):
     """
 
     def __init__(self, cfg: DictConfig, agent: Any, env: Any):
-        self.start_key: str = str(DEPLOY_START_KEY).lower()
-        self.stop_key: str = str(DEPLOY_STOP_KEY).lower()
-        self.continue_key: str = str(DEPLOY_CONTINUE_KEY).lower()
-        self.init_key: str = str(DEPLOY_INIT_KEY).lower()
-        self.quit_key: str = str(DEPLOY_QUIT_KEY).lower()
-        self.teleop_key: str = str(DEPLOY_TELEOP_KEY).lower()
-        self.risk_check_hz: float = float(getattr(cfg.runner, "risk_check_hz", 0.0))
+        self.start_key: str = str(
+            runner_config_get(cfg, "deploy_start_key", DEPLOY_START_KEY)
+        ).lower()
+        self.stop_key: str = str(
+            runner_config_get(cfg, "deploy_stop_key", DEPLOY_STOP_KEY)
+        ).lower()
+        self.continue_key: str = str(
+            runner_config_get(cfg, "deploy_continue_key", DEPLOY_CONTINUE_KEY)
+        ).lower()
+        self.init_key: str = str(
+            runner_config_get(cfg, "deploy_init_key", DEPLOY_INIT_KEY)
+        ).lower()
+        self.quit_key: str = str(
+            runner_config_get(cfg, "deploy_quit_key", DEPLOY_QUIT_KEY)
+        ).lower()
+        self.teleop_key: str = str(
+            runner_config_get(cfg, "deploy_teleop_key", DEPLOY_TELEOP_KEY)
+        ).lower()
+        self.risk_check_hz: float = float(runner_config_get(cfg, "risk_check_hz", 0.0))
         self.risk_use_safe_action: bool = bool(
-            getattr(cfg.runner, "risk_use_safe_action", True)
+            runner_config_get(cfg, "risk_use_safe_action", True)
         )
         self._key_lock = threading.Lock()
         self._init_requested = False
@@ -154,6 +167,9 @@ class HITLDeployRunner(HITLRunner):
             except Exception as exc:
                 print(f"[HITLDeployRunner] env teleop toggle failed: {exc}")
                 return False
+        if hasattr(base_env, "tele_enabled"):
+            base_env.tele_enabled = not bool(base_env.tele_enabled)
+            return True
         return False
 
     def _risk_worker(self) -> None:
@@ -233,14 +249,20 @@ class HITLDeployRunner(HITLRunner):
 
     def _disable_teleop(self) -> None:
         base_env = self._unwrapped_env()
-        if not hasattr(base_env, "switch_tele"):
-            return
-        try:
-            teleop_enabled = bool(base_env.get_env_state("teleop"))
-        except Exception:
-            teleop_enabled = False
+        if hasattr(base_env, "get_env_state"):
+            try:
+                teleop_enabled = bool(base_env.get_env_state("teleop"))
+            except Exception:
+                teleop_enabled = bool(getattr(base_env, "tele_enabled", False))
+        else:
+            teleop_enabled = bool(getattr(base_env, "tele_enabled", False))
         if teleop_enabled:
-            base_env.switch_tele("false")
+            if hasattr(base_env, "switch_tele"):
+                base_env.switch_tele("false")
+            elif hasattr(base_env, "tele_enabled"):
+                base_env.tele_enabled = False
+            else:
+                return
             print("[HITLDeployRunner] 已强制退出遥操状态。")
 
     def _refresh_obs_with_safe_step(self, obs: Dict[str, Any]) -> Dict[str, Any]:

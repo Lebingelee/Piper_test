@@ -7,8 +7,8 @@ import h5py
 import json
 import torch
 import threading
+import sys
 from abc import ABC, abstractmethod
-from pynput import keyboard
 from typing import Dict, Any, List, Optional, Literal
 
 # 尝试导入 LeRobot
@@ -270,6 +270,9 @@ class DataCollectionManager:
         self.env = env
         self.mode = mode
         self.preview = preview
+        if self.preview and self._is_headless_display():
+            print("[Recorder] 未检测到 DISPLAY/WAYLAND_DISPLAY，自动关闭 OpenCV 预览。")
+            self.preview = False
         self.hz = self.env.unwrapped.hz
         self.teleop_on_start = teleop_on_start
         self.task_description = task_description
@@ -324,10 +327,15 @@ class DataCollectionManager:
         self._safe_action_state_cache: Optional[Dict[str, np.ndarray]] = None
         
         # 监听与显示
-        self.listener = keyboard.Listener(on_press=self._on_press)
-        self.listener.start()
+        self.listener = self._start_keyboard_listener()
         if self.teleop_on_start:
             self._switch_teleop("true")
+
+    @staticmethod
+    def _is_headless_display() -> bool:
+        if os.name == "nt":
+            return False
+        return not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
 
     def _ensure_control_mode_in_task_name(self, task_name: str) -> str:
         control_mode = str(getattr(self.env.unwrapped, "control_mode", "") or "").lower()
@@ -370,55 +378,112 @@ class DataCollectionManager:
 
         return candidate
 
+    def _start_keyboard_listener(self):
+        if self._is_headless_display():
+            print("[Recorder] 未检测到图形显示，使用终端输入快捷键后端。")
+            return self._start_terminal_keyboard_listener()
+
+        try:
+            from pynput import keyboard
+
+            listener = keyboard.Listener(on_press=self._on_press)
+            listener.start()
+            print("[Recorder] 键盘监听后端: pynput")
+            return listener
+        except Exception as exc:
+            print(f"[Recorder] pynput 键盘监听不可用，切换到终端输入后端: {exc}")
+
+        return self._start_terminal_keyboard_listener()
+
+    def _start_terminal_keyboard_listener(self):
+        if not sys.stdin.isatty():
+            print("[Recorder] stdin 不是 TTY，无法启用终端快捷键；请用 Ctrl-C 结束进程。")
+            return None
+
+        listener = threading.Thread(target=self._terminal_key_loop, daemon=True)
+        listener.start()
+        print("[Recorder] 键盘监听后端: terminal（输入快捷键后回车）")
+        return listener
+
+    def _terminal_key_loop(self):
+        try:
+            import select
+        except Exception as exc:
+            print(f"[Recorder] 终端快捷键后端不可用: {exc}")
+            return
+
+        while not self.is_finished:
+            if self._is_prompting_max_step:
+                time.sleep(0.1)
+                continue
+
+            readable, _, _ = select.select([sys.stdin], [], [], 0.1)
+            if not readable:
+                continue
+
+            line = sys.stdin.readline()
+            if not line:
+                time.sleep(0.1)
+                continue
+            text = line.strip().lower()
+            if not text:
+                continue
+            if self._handle_key_char(text[0]) is False:
+                return
+
+    def _handle_key_char(self, char: str):
+        if self._is_prompting_max_step:
+            return None
+        if char == 't':
+            self._toggle_teleop()
+        elif char == 'i':
+            if not self._reset_lock.acquire(blocking=False):
+                print("[I] 复位正在执行，忽略重复按键。")
+                return None
+            self.is_resetting = True
+            try:
+                print("[I] 执行复位...")
+                self.env.reset(options={"sync_master": True})
+                self._safe_action_state_cache = None
+            finally:
+                self.is_resetting = False
+                self._reset_lock.release()
+        elif char == 's':
+            if not self.is_recording:
+                self.recorder.start_episode(self.traj_counter)
+                self._record_frame_idx = 0
+                self.is_recording = True
+                print(f"[S] 开始录制 Traj {self.traj_counter} ({self.mode})...")
+        elif char == 'e':
+            if self.is_recording:
+                self.is_recording = False
+                self.recorder.end_episode(success=True)
+                self._record_frame_idx = 0
+                self.traj_counter += 1
+        elif char == 'f':
+            if self.is_recording:
+                self.is_recording = False
+                self.recorder.end_episode(success=False)
+                self._record_frame_idx = 0
+                self.traj_counter += 1
+        elif char == 'd':
+            if self.is_recording:
+                self.is_recording = False
+                self.recorder.discard_episode()
+                self._record_frame_idx = 0
+                print("[D] 丢弃当前轨迹。")
+        elif char == 'q':
+            print("[Q] 退出。")
+            self.is_finished = True
+            return False
+        return None
+
     def _on_press(self, key):
         try:
             char = key.char.lower()
-            if self._is_prompting_max_step:
-                return
-            if char == 't':
-                self._toggle_teleop()
-            elif char == 'i':
-                if not self._reset_lock.acquire(blocking=False):
-                    print("[I] 复位正在执行，忽略重复按键。")
-                    return
-                self.is_resetting = True
-                try:
-                    print("[I] 执行复位...")
-                    self.env.reset(options={"sync_master": True})
-                    self._safe_action_state_cache = None
-                finally:
-                    self.is_resetting = False
-                    self._reset_lock.release()
-            elif char == 's':
-                if not self.is_recording:
-                    self.recorder.start_episode(self.traj_counter)
-                    self._record_frame_idx = 0
-                    self.is_recording = True
-                    print(f"[S] 开始录制 Traj {self.traj_counter} ({self.mode})...")
-            elif char == 'e':
-                if self.is_recording:
-                    self.is_recording = False
-                    self.recorder.end_episode(success=True)
-                    self._record_frame_idx = 0
-                    self.traj_counter += 1
-            elif char == 'f':
-                if self.is_recording:
-                    self.is_recording = False
-                    self.recorder.end_episode(success=False)
-                    self._record_frame_idx = 0
-                    self.traj_counter += 1
-            elif char == 'd':
-                if self.is_recording:
-                    self.is_recording = False
-                    self.recorder.discard_episode()
-                    self._record_frame_idx = 0
-                    print("[D] 丢弃当前轨迹。")
-            elif char == 'q':
-                print("[Q] 退出。")
-                self.is_finished = True
-                return False 
         except AttributeError:
-            pass
+            return None
+        return self._handle_key_char(char)
 
     def _switch_teleop(self, mode: str):
         unwrapped = self.env.unwrapped
@@ -511,7 +576,15 @@ class DataCollectionManager:
             
             # 4. 预览
             if self.preview:
-                self._visualize(obs, info)
+                try:
+                    self._visualize(obs, info)
+                except cv2.error as exc:
+                    print(f"[Recorder] OpenCV 预览失败，已自动关闭预览: {exc}")
+                    self.preview = False
+                    try:
+                        cv2.destroyAllWindows()
+                    except cv2.error:
+                        pass
             
             # 频率维持
             elapsed = time.time() - t_start

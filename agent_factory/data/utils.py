@@ -94,7 +94,7 @@ def preprocess_obs(obs_dict: Dict[str, Any], device: torch.device = torch.device
     统一的观测预处理逻辑：
     1. 图像 (rgb/depth) 分别归一化。
     2. 类型转换 (float32)。
-    3. 保留其他字段 (state, cond 等) 并搬运到指定设备。
+    3. state 保持原语义；其他非图像字段 (feature, cond 等) 只做 tensor/device 转换。
     4. depth 保持独立模态，不隐式拼接进 rgb。
     """
     out = {}
@@ -126,9 +126,13 @@ def preprocess_obs(obs_dict: Dict[str, Any], device: torch.device = torch.device
              depth = depth / 1024.0
         out['depth'] = depth
     
-    # 3. 处理其他所有字段 (state, cond, action 等)
+    # 3. 处理 state
+    if 'state' in obs_dict:
+        out['state'] = to_torch(obs_dict['state'])
+
+    # 4. 处理其他所有字段。feature 等已提取观测不做额外归一化或拼接。
     for k, v in obs_dict.items():
-        if k not in ['rgb', 'depth']:
+        if k not in ['rgb', 'depth', 'state']:
             out[k] = to_torch(v)
                 
     return out

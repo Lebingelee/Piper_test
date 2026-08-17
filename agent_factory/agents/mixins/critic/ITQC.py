@@ -8,10 +8,9 @@ from typing import Dict, Literal, Optional
 
 # 引用组件
 from agent_factory.agents.mixins.critic.base_eval import CriticEvalMixinBase
+from agent_factory.agents.mixins.module_builder import ModuleBuilderMixin
 
 from agent_factory.modules.critics.itqc_critic import MultiHeadQuantileNet
-from agent_factory.modules.encoders.visual_encoder import VisualEncoder
-from agent_factory.modules.encoders.state_encoder import BaseStateEncoder
 
 from agent_factory.config.structure import BaseCriticConfig
 
@@ -27,7 +26,7 @@ class ITQCCriticConfig(BaseCriticConfig):
 
 
 
-class ITQCCriticMixin(CriticEvalMixinBase): #Implicit Truncated Q-learning
+class ITQCCriticMixin(ModuleBuilderMixin, CriticEvalMixinBase): #Implicit Truncated Q-learning
 
     CONFIG_CLASS = ITQCCriticConfig
     CONFIG_KEY = "critic"
@@ -43,14 +42,7 @@ class ITQCCriticMixin(CriticEvalMixinBase): #Implicit Truncated Q-learning
         )
 
         # === 1. Standard Critic (Normal) ===
-        vis_enc = VisualEncoder(**cfg.encoder.visual)
-        self.critic_encoder = BaseStateEncoder(
-            vis_enc, 
-            self.cfg.env.proprio_dim, 
-            cfg.encoder.out_dim, 
-            num_cameras=self.cfg.env.num_cameras,
-            view_fusion=cfg.encoder.view_fusion
-            )
+        self.critic_encoder = self._build_encoder_from_config(cfg.encoder)
         
         # 假设 action_dim 是单步维度，ITQC MultiHeadQuantileNet 内部会处理 pred_horizon
         self.q_net = MultiHeadQuantileNet(self.critic_encoder, action_dim=self.cfg.env.action_dim, pred_horizon=self.cfg.env.pred_horizon, **common_args)
@@ -62,8 +54,7 @@ class ITQCCriticMixin(CriticEvalMixinBase): #Implicit Truncated Q-learning
         self.v_optimizer = torch.optim.AdamW(self.v_net.parameters(), lr=cfg.lr)
 
         # === 2. Success Critic (Pretty/Suc) ===
-        vis_enc_suc = VisualEncoder(**cfg.encoder.visual)
-        self.suc_critic_encoder = BaseStateEncoder(vis_enc_suc, cfg.encoder.proprio_dim, cfg.encoder.out_dim, num_cameras=self.cfg.env.num_cameras, view_fusion=cfg.encoder.view_fusion)
+        self.suc_critic_encoder = self._build_encoder_from_config(cfg.encoder)
         
         self.suc_q_net = MultiHeadQuantileNet(self.suc_critic_encoder, action_dim=self.cfg.env.action_dim, pred_horizon=self.cfg.env.pred_horizon, **common_args)
         self.suc_v_net = MultiHeadQuantileNet(self.suc_critic_encoder, action_dim=0, **common_args)

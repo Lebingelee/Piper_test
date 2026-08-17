@@ -63,6 +63,30 @@ def _maybe_start_piper_cameras(env, env_cfg):
         time.sleep(warmup_sec)
 
 
+def _get_flatten_obs_obj(env_cfg):
+    return getattr(env_cfg, "flatten_obs_obj", ["all"])
+
+
+def _get_flatten_action(env_cfg):
+    return bool(getattr(env_cfg, "flatten_action", True))
+
+
+def _get_robosuite_env_control_mode(env_cfg):
+    mode = str(getattr(env_cfg, "env_control_mode", "") or "").strip().lower()
+    if mode in {"absolute_joint", "absolute_pose", "delta_pose"}:
+        return mode
+    return None
+
+
+def _socket_setting(env_cfg, file_cfg, name, default=None):
+    """Prefer explicit runtime endpoint settings over the optional YAML file."""
+    value = getattr(env_cfg, name, None)
+    if value is not None and value != "":
+        return value
+    socket_cfg = file_cfg.get("socket", file_cfg) if isinstance(file_cfg, dict) else {}
+    return socket_cfg.get(name, default) if isinstance(socket_cfg, dict) else default
+
+
 def create_env(env_cfg):
     """
     Factory function to create environments based on configuration.
@@ -70,24 +94,35 @@ def create_env(env_cfg):
     Args:
         env_cfg (object): Common env config (e.g., env_id, control_mode).
     """
-    library = getattr(env_cfg, 'library', 'gymnasium')
-    env_id = env_cfg.env_id
+    library = str(getattr(env_cfg, "library", "") or "").strip().lower()
+    env_id = str(getattr(env_cfg, "env_id", "") or "").strip()
+    if not library:
+        raise ValueError(
+            "cfg.env.library is required before creating an environment. "
+            "Set it explicitly to one of: mani_skill, robosuite, piper, realman, socket, gymnasium."
+        )
+    if library == "gymnasium" and not env_id:
+        raise ValueError(f"cfg.env.env_id is required when cfg.env.library='{library}'.")
+    if library in {"mani_skill", "robosuite", "piper"} and not str(getattr(env_cfg, "env_config_path", "") or "").strip():
+        raise ValueError(f"cfg.env.env_config_path is required when cfg.env.library='{library}'.")
     env_file_cfg, env_config_path = _load_env_config(env_cfg)
 
     logger.info(f"Creating Environment: {env_id} via {library}...")
 
     # --- 1. Base Environment Creation ---
     if library == 'mani_skill':
-        from agent_factory.env.wrappers import ManiSkillAdapterWrapper
+        # ManiSkill-specific normalization is owned by agent_infra.  The
+        # algorithm boundary is identical to every other project environment:
+        # MetadataAdapterWrapper consumes the raw nested contract + meta_keys.
+        from agent_factory.env.wrappers import MetadataAdapterWrapper
+        from agent_infra.maniskill_env import ManiSkillEnv
 
-        env = gym.make(
-            env_id,
-            obs_mode=getattr(env_cfg, 'obs_mode', 'rgbd'),
-            control_mode=getattr(env_cfg, 'control_mode', 'pd_ee_delta_pose'),
-            max_episode_steps=getattr(env_cfg, 'max_episode_steps', 100),
-            **env_file_cfg
+        env = ManiSkillEnv.from_config_path(env_config_path)
+        env = MetadataAdapterWrapper(
+            env,
+            flatten_obs_obj=_get_flatten_obs_obj(env_cfg),
+            flatten_action=_get_flatten_action(env_cfg),
         )
-        env = ManiSkillAdapterWrapper(env)
 
     elif library == 'realman':
         robot_cfg = env_file_cfg.get("robot", {}) if isinstance(env_file_cfg, dict) else {}
@@ -130,7 +165,11 @@ def create_env(env_cfg):
                 )
 
         from agent_factory.env.wrappers import MetadataAdapterWrapper
-        env = MetadataAdapterWrapper(env)
+        env = MetadataAdapterWrapper(
+            env,
+            flatten_obs_obj=_get_flatten_obs_obj(env_cfg),
+            flatten_action=_get_flatten_action(env_cfg),
+        )
 
     elif library == 'piper':
         from agent_infra.Piper_Env.Env.single_piper_env import SinglePiperEnv
@@ -148,7 +187,67 @@ def create_env(env_cfg):
             control_mode=getattr(env_cfg, 'control_mode', None),
             hz=hz,
         )
-        env = MetadataAdapterWrapper(env)
+        env = MetadataAdapterWrapper(
+            env,
+            flatten_obs_obj=_get_flatten_obs_obj(env_cfg),
+            flatten_action=_get_flatten_action(env_cfg),
+        )
+
+    elif library == 'robosuite':
+        from agent_factory.env.wrappers import MetadataAdapterWrapper
+        from agent_infra.robosuite_env.Env.robosuite_env import RobosuiteEnv
+
+        common_cfg = env_file_cfg.get("common", {}) if isinstance(env_file_cfg, dict) else {}
+        hz = common_cfg.get("default_hz", getattr(env_cfg, "hz", None))
+        env = RobosuiteEnv(
+            config_path=env_config_path or None,
+            hz=hz,
+            env_control_mode=_get_robosuite_env_control_mode(env_cfg),
+            controller_backend=getattr(env_cfg, "controller_backend", None),
+        )
+        env = MetadataAdapterWrapper(
+            env,
+            flatten_obs_obj=_get_flatten_obs_obj(env_cfg),
+            flatten_action=_get_flatten_action(env_cfg),
+        )
+
+    elif library == 'socket':
+        from agent_infra.socket_env import LegacySocketEnv, SocketEnv
+        from agent_factory.env.wrappers import MetadataAdapterWrapper
+
+        host = str(_socket_setting(env_cfg, env_file_cfg, "host", "") or "")
+        port = _socket_setting(env_cfg, env_file_cfg, "port")
+        if not host or port is None:
+            raise ValueError("cfg.env.host and cfg.env.port are required when cfg.env.library='socket'.")
+        protocol_version = int(_socket_setting(env_cfg, env_file_cfg, "protocol_version", 1))
+        common_socket_kwargs = dict(
+            source_host=_socket_setting(env_cfg, env_file_cfg, "source_host"),
+            source_port=_socket_setting(env_cfg, env_file_cfg, "source_port"),
+            tcp_nodelay=bool(_socket_setting(env_cfg, env_file_cfg, "tcp_nodelay", True)),
+            keepalive=bool(_socket_setting(env_cfg, env_file_cfg, "keepalive", False)),
+        )
+        if protocol_version == 2:
+            env = SocketEnv(
+                host, int(port),
+                connect_timeout_s=float(_socket_setting(env_cfg, env_file_cfg, "connect_timeout_s", 10.0)),
+                request_timeout_s=float(_socket_setting(env_cfg, env_file_cfg, "request_timeout_s", 10.0)),
+                **common_socket_kwargs,
+            )
+        elif protocol_version == 1:
+            env = LegacySocketEnv(
+                host, int(port),
+                timeout=float(_socket_setting(env_cfg, env_file_cfg, "timeout", _socket_setting(env_cfg, env_file_cfg, "socket_timeout", 10.0))),
+                **common_socket_kwargs,
+            )
+        else:
+            raise ValueError(f"Unsupported socket protocol_version={protocol_version}; use explicit 1 or 2.")
+        # v2 connect only DESCRIBEs; legacy v1 retains its push-first handshake.
+        env.connect()
+        env = MetadataAdapterWrapper(
+            env,
+            flatten_obs_obj=_get_flatten_obs_obj(env_cfg),
+            flatten_action=_get_flatten_action(env_cfg),
+        )
 
     elif library == 'gymnasium':
         # 标准 Gym 环境

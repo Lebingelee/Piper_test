@@ -174,3 +174,33 @@ class BaseAgent(nn.Module, ABC):
         actions = torch.cat(action_chunks, dim=0)
         self.fit_action_normalizer(actions)
         print(f"[BaseAgent] Action normalizer fitted with {actions.shape[0]} samples.")
+
+    def _fit_obs_normalizer_from_dataset(self, dataset: Any):
+        """
+        统一 state observation 归一化拟合入口。
+        Dataset 需要提供 get_all_states()，返回 [..., proprio_dim]。
+        """
+        if not hasattr(self, "fit_obs_normalizer"):
+            return
+
+        state_chunks = []
+        for source in self._collect_action_sources(dataset):
+            if hasattr(source, "get_all_states"):
+                raw_states = source.get_all_states()
+                if raw_states is None:
+                    continue
+                if not isinstance(raw_states, torch.Tensor):
+                    raw_states = torch.as_tensor(raw_states, dtype=torch.float32)
+                else:
+                    raw_states = raw_states.float()
+                if raw_states.ndim > 2:
+                    raw_states = raw_states.reshape(-1, raw_states.shape[-1])
+                state_chunks.append(raw_states)
+
+        if not state_chunks:
+            print("[BaseAgent] Skip obs normalizer fit: dataset has no get_all_states().")
+            return
+
+        states = torch.cat(state_chunks, dim=0)
+        self.fit_obs_normalizer(states)
+        print(f"[BaseAgent] Obs normalizer fitted with {states.shape[0]} samples.")

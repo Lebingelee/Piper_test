@@ -1,0 +1,12 @@
+reporter:
+  bind_host: "127.0.0.1"
+  port: 5000
+  protocol_version: 2
+  request_timeout_s: 10.0
+  max_message_bytes: 536870912
+  backlog: 1
+  request_cache_size: 128
+
+# Import path for an application-owned zero-argument factory.  It must create
+# a Gymnasium-compatible environment; task-specific options stay in that app.
+local_env_factory: "agent_infra.socket_env.Report.example_env:make_env"

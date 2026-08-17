@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 
 from agent_factory.agents.registry import get_default_config, make_agent
-from agent_factory.config.manager import ConfigManager
+from agent_factory.config.resolution import general_resolve
 from agent_factory.data.impl.diffusion_itqc.dataset import ExpertDataset
 from agent_factory.env.env_factories import create_env
 
@@ -33,6 +33,8 @@ def main():
     if args.demo_path:
         cfg.dataset.expert.demo_path = args.demo_path
 
+    cfg, _runtime_spec = general_resolve(file_config=cfg)
+
     # Keep this script lightweight: only align config and build components.
     env = create_env(cfg.env)
     env.reset()
@@ -43,7 +45,6 @@ def main():
         device=cfg.device,
     )
 
-    ConfigManager.check_consistency(cfg)
     agent = make_agent(args.agent_type, cfg)
     required = agent.required_keys
     print(f"[Trial] agent={args.agent_type}, required_keys={required}, dataset_len={len(dataset)}")

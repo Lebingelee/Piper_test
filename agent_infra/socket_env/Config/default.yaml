@@ -1,0 +1,12 @@
+# Generic remote-environment client settings.  This contains no task-specific
+# names; supply an endpoint reachable from the machine running agent_factory.
+socket:
+  protocol_version: 2
+  host: "127.0.0.1"
+  port: 5000
+  connect_timeout_s: 10.0
+  request_timeout_s: 10.0
+  source_host: null
+  source_port: null
+  tcp_nodelay: true
+  keepalive: false

@@ -3,6 +3,7 @@ from pathlib import Path
 import re
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 import time
+import warnings
 import h5py
 import numpy as np
 import torch
@@ -22,7 +23,7 @@ from agent_factory.data.base import BaseTrajectoryDataset, TrajectoryRef, traj_s
 #           inside __getitem__ for the requested obs_horizon window
 #
 # This is intentionally not exposed as a config field for now.
-CPIQL_RGB_LOAD_MODE = "lazy"#"all" # 
+CPIQL_RGB_LOAD_MODE = "lazy"  # "all"
 
 if CPIQL_RGB_LOAD_MODE not in {"all", "lazy"}:
     raise ValueError(
@@ -53,6 +54,25 @@ def cfg_get(cfg: Any, path: str, default: Any) -> Any:
     return cur
 
 
+def resolve_cpiql_step_gamma(cfg: Any) -> float:
+    raw_gamma = cfg_get(cfg, "env.gamma", 0.99)
+    if isinstance(raw_gamma, str):
+        raw_gamma = raw_gamma.strip().lower()
+    if raw_gamma == "default":
+        mode = str(cfg_get(cfg, "critic.gamma_default_mode", "one_minus_margin_over_max_episode_steps"))
+        if mode != "one_minus_margin_over_max_episode_steps":
+            raise ValueError(f"Unsupported CPIQL gamma_default_mode={mode!r}.")
+        max_steps = max(float(cfg_get(cfg, "env.max_episode_steps", 1) or 1), 1.0)
+        margin = float(cfg_get(cfg, "critic.gamma_default_margin", 2.0))
+        gamma = max(0.0, min(1.0, 1.0 - margin / max_steps))
+        try:
+            cfg.env.gamma = gamma
+        except Exception:
+            pass
+        return gamma
+    return float(raw_gamma)
+
+
 def compute_pad_vec(act_seq: torch.Tensor, is_abs_mode: bool, pad_action_arm: Optional[torch.Tensor] = None):
     if is_abs_mode:
         return act_seq[-1]
@@ -66,14 +86,25 @@ def compute_progress_gammas(
     max_episode_steps: int,
     gamma_floor: float = 1e-4,
     terminal_idx: Optional[int] = None,
+    gamma: Optional[float] = None,
+    mode: str = "constant",
 ) -> np.ndarray:
     if length <= 0:
         return np.zeros(0, dtype=np.float32)
     terminal_idx = length - 1 if terminal_idx is None else int(np.clip(terminal_idx, 0, length - 1))
+    mode = str(mode or "constant").strip().lower()
+    gammas = np.ones(length, dtype=np.float32)
+    if mode in {"constant", "fixed", "uniform"}:
+        if gamma is None:
+            max_steps = max(float(max_episode_steps), 1.0)
+            gamma = max(0.0, min(1.0, 1.0 - 2.0 / max_steps))
+        step_gamma = max(float(gamma), float(gamma_floor))
+        gammas[:] = step_gamma
+        gammas[terminal_idx:] = 0.0
+        return gammas
+
     horizon = max(terminal_idx + 1, 1)
     max_steps = max(int(max_episode_steps), horizon)
-
-    gammas = np.ones(length, dtype=np.float32)
     for t in range(length):
         if t >= terminal_idx:
             gammas[t] = 0.0
@@ -97,10 +128,16 @@ def compute_progress_returns(rewards: np.ndarray, gammas: np.ndarray) -> np.ndar
 def compute_n_step_progress_signals(
     rewards: np.ndarray,
     gammas: np.ndarray,
+    terminals: np.ndarray,
     start_idx: int,
     n: int,
-) -> Tuple[torch.Tensor, float]:
+) -> Tuple[torch.Tensor, float, bool]:
     length = len(rewards)
+    if len(gammas) != length or len(terminals) != length:
+        raise ValueError(
+            "CPIQL n-step rewards, gammas, and terminals must have the same length, "
+            f"got rewards={length}, gammas={len(gammas)}, terminals={len(terminals)}."
+        )
     start_idx = int(np.clip(start_idx, 0, max(length - 1, 0)))
     end_idx = min(start_idx + int(n), length)
     running_discount = 1.0
@@ -108,7 +145,8 @@ def compute_n_step_progress_signals(
     for idx in range(start_idx, end_idx):
         n_step_reward += running_discount * float(rewards[idx])
         running_discount *= float(gammas[idx])
-    return torch.tensor(n_step_reward, dtype=torch.float32), float(running_discount)
+    terminated = bool(np.any(np.asarray(terminals, dtype=bool)[start_idx:end_idx]))
+    return torch.tensor(n_step_reward, dtype=torch.float32), float(running_discount), terminated
 
 
 def _read_json_dataset(dataset) -> Dict[str, Any]:
@@ -157,9 +195,20 @@ def _describe_rgb_source(group: h5py.Group, meta: Optional[Dict[str, Any]]) -> O
         return None
     rgb_node = group["rgb"]
     if isinstance(rgb_node, h5py.Dataset):
-        return {"mode": "dataset"}
+        return {"mode": "dataset", "source_length": int(rgb_node.shape[0])}
     rgb_keys = _ordered_group_keys(rgb_node, meta, "obs", "rgb")
-    return {"mode": "group", "keys": list(rgb_keys)}
+    if not rgb_keys:
+        raise KeyError(f"No rgb datasets found under group {rgb_node.name}")
+    lengths = {int(rgb_node[key].shape[0]) for key in rgb_keys}
+    if len(lengths) != 1:
+        raise ValueError(
+            f"CPIQL RGB datasets under {rgb_node.name} must have equal lengths, got {sorted(lengths)}."
+        )
+    return {
+        "mode": "group",
+        "keys": list(rgb_keys),
+        "source_length": lengths.pop(),
+    }
 
 
 def _read_rgb_frames(obs_group: h5py.Group, rgb_source: Dict[str, Any], indices: Sequence[int]) -> np.ndarray:
@@ -178,10 +227,10 @@ def _read_rgb_frames(obs_group: h5py.Group, rgb_source: Dict[str, Any], indices:
 
 
 def _read_meta(h5_file: h5py.File, traj_group: h5py.Group) -> Dict[str, Any]:
-    if "meta" in h5_file and "env_meta" in h5_file["meta"]:
-        return _read_json_dataset(h5_file["meta"]["env_meta"])
     if "meta" in traj_group and isinstance(traj_group["meta"], h5py.Group) and "env_meta" in traj_group["meta"]:
         return _read_json_dataset(traj_group["meta"]["env_meta"])
+    if "meta" in h5_file and "env_meta" in h5_file["meta"]:
+        return _read_json_dataset(h5_file["meta"]["env_meta"])
     if "meta_keys" in traj_group:
         return _read_json_dataset(traj_group["meta_keys"])
     return {}
@@ -267,6 +316,41 @@ def load_flatten_trajectory(
         raise KeyError(f"CPIQL trajectory {traj_group.name} has no usable obs/rgb or obs/state data.")
 
     length = action.shape[0]
+    if length <= 0:
+        raise ValueError(f"CPIQL trajectory {traj_group.name} must contain at least one action.")
+
+    obs_lengths = {key: int(value.shape[0]) for key, value in obs.items()}
+    if rgb_source is not None and lazy_rgb:
+        obs_lengths["rgb"] = int(rgb_source["source_length"])
+    unique_obs_lengths = set(obs_lengths.values())
+    if len(unique_obs_lengths) != 1:
+        raise ValueError(
+            f"CPIQL trajectory {traj_group.name} observation modalities must have equal lengths, "
+            f"got {obs_lengths}."
+        )
+
+    obs_length = unique_obs_lengths.pop()
+    legacy_terminal_observation_padded = False
+    if obs_length == length:
+        legacy_terminal_observation_padded = True
+        obs = {
+            key: np.concatenate([value, value[-1:]], axis=0)
+            for key, value in obs.items()
+        }
+    elif obs_length != length + 1:
+        raise ValueError(
+            f"CPIQL trajectory {traj_group.name} must satisfy len(obs) == len(action) + 1. "
+            f"Legacy len(obs) == len(action) is also supported by repeating the final observation; "
+            f"got obs={obs_length}, action={length}."
+        )
+
+    if rgb_source is not None:
+        rgb_source = {
+            **rgb_source,
+            "observation_length": length + 1,
+            "legacy_terminal_observation_padded": legacy_terminal_observation_padded,
+        }
+
     return {
         "obs": obs,
         "action": action,
@@ -276,6 +360,7 @@ def load_flatten_trajectory(
         "truncated": np.asarray(traj_group["truncated"][()], dtype=bool).reshape(-1)[:length],
         "boundary_reason": traj_group.attrs.get("boundary_reason", ""),
         "rgb_source": rgb_source,
+        "legacy_terminal_observation_padded": legacy_terminal_observation_padded,
     }
 
 
@@ -309,6 +394,8 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
 
         self.k_grid = [float(v) for v in cfg_get(cfg, "critic.k_grid", [0.0, 0.2, 0.4, 0.6, 0.8, 1.0])]
         self.gamma_floor = float(cfg_get(cfg, "critic.gamma_floor", 1e-4))
+        self.gamma_mode = str(cfg_get(cfg, "critic.gamma_mode", "constant"))
+        self.step_gamma = resolve_cpiql_step_gamma(cfg)
         self.intervention_terminal_reward = float(cfg_get(cfg, "critic.intervention_terminal_reward", 0.2))
 
         # 下面所有按轨迹存储的 list，索引单位都是“拆分后的子轨迹”，不是原始 H5 轨迹。
@@ -322,7 +409,7 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
         self.truncated: List[np.ndarray] = []  # 每条子轨迹逐帧截断标记，如超时、人工停止或失败截断。
         self.intervention: List[np.ndarray] = []  # 每条子轨迹逐帧专家接管标记；专家段通常全 True，自主段通常全 False。
         self.rewards: List[np.ndarray] = []  # 每条子轨迹逐帧 reward；通常只有末帧非零。
-        self.gammas: List[np.ndarray] = []  # 每条子轨迹逐帧动态折扣 gamma，用于形成近似线性的 progress return。
+        self.gammas: List[np.ndarray] = []  # 每条子轨迹逐帧折扣 gamma；默认使用一致 gamma，可通过 critic.gamma_mode 切换旧进度 gamma。
         self.progress_returns: List[np.ndarray] = []  # 每条子轨迹逐帧进度回报；成功段末帧为 1.0，早期逐步变小。
         self.progress_masks: List[np.ndarray] = []  # progress anchor 默认参与掩码；具体权重在 critic 中按样本语义计算。
         self.progress_weights: List[np.ndarray] = []  # progress anchor 默认附加权重；具体 success/failure/boundary 缩放在 critic 中计算。
@@ -419,6 +506,7 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
 
     def _cache_trajectories(self):
         global_count = 0
+        legacy_terminal_observation_refs = []
         for ref in self.trajectory_refs:
             with h5py.File(ref.file_path, "r") as h5_file:
                 group = h5_file if ref.traj_key is None else h5_file[ref.traj_key]
@@ -429,6 +517,10 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
                     lazy_rgb=self.lazy_rgb,
                 )
                 intervention = self._load_intervention(group, len(traj["action"]))
+                if traj["legacy_terminal_observation_padded"]:
+                    legacy_terminal_observation_refs.append(
+                        f"{ref.file_path}:{ref.traj_key or '/'}"
+                    )
 
             for start_idx, end_idx, segment_type in self._execution_segments(traj, intervention):
                 traj_idx = len(self.action_data)
@@ -458,12 +550,24 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
                 length = len(self.action_data[traj_idx])
                 is_success = _is_success_segment_type(self.segment_type_names[traj_idx])
                 pad_before = self.obs_horizon - 1
-                for start in range(-pad_before, length - self.act_horizon + 1):
+                for start in range(-pad_before, length):
                     sl = (traj_idx, start, start + self.pred_horizon, global_count)
                     self.slices_all.append(sl)
                     if is_success:
                         self.slices_success.append(sl)
                     global_count += 1
+
+        if legacy_terminal_observation_refs:
+            preview = ", ".join(legacy_terminal_observation_refs[:3])
+            if len(legacy_terminal_observation_refs) > 3:
+                preview += f", ... (+{len(legacy_terminal_observation_refs) - 3} more)"
+            warnings.warn(
+                "CPIQLDataset loaded legacy trajectories with len(obs) == len(action). "
+                "The final observation was repeated to construct a terminal state so loading can continue. "
+                f"affected={len(legacy_terminal_observation_refs)}; examples={preview}",
+                UserWarning,
+                stacklevel=2,
+            )
 
     def _append_segment(
         self,
@@ -475,13 +579,13 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
         segment_type: str,
         end_is_intervention_boundary: bool = False,
     ):
-        obs = {key: value[start_idx:end_idx + 1] for key, value in traj["obs"].items()}
+        obs = {key: value[start_idx:end_idx + 2] for key, value in traj["obs"].items()}
         rgb_source = None
         if self.include_rgb and self.lazy_rgb and traj.get("rgb_source") is not None:
             rgb_source = {
                 **dict(traj["rgb_source"]),
                 "segment_start_idx": int(start_idx),
-                "segment_end_idx": int(end_idx),
+                "segment_end_idx": int(end_idx + 1),
             }
         action = traj["action"][start_idx:end_idx + 1]
         success = traj["success"][start_idx:end_idx + 1].copy()
@@ -622,6 +726,8 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
             max_episode_steps=self.cfg.env.max_episode_steps,
             gamma_floor=self.gamma_floor,
             terminal_idx=terminal_idx,
+            gamma=self.step_gamma,
+            mode=self.gamma_mode,
         )
         returns = compute_progress_returns(rewards, gammas)
         progress_mask = np.ones(length, dtype=np.float32)
@@ -711,6 +817,15 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
         self.slices = self.slices_success if mode == "success" else self.slices_all
 
     def get_all_actions(self):
+        if self.mode == "success":
+            action_data = [
+                action
+                for idx, action in enumerate(self.action_data)
+                if self._is_success_side_segment(idx)
+            ]
+            if not action_data:
+                return torch.empty((0, self.action_data[0].shape[-1]), dtype=torch.float32)
+            return torch.cat(action_data, dim=0)
         return torch.cat(self.action_data, dim=0)
 
     def _load_rgb_sequence(self, traj_idx: int, indices: Sequence[int]) -> np.ndarray:
@@ -719,7 +834,11 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
             raise KeyError(f"Lazy RGB source is not available for traj_idx={traj_idx}.")
         file_path, traj_key, _segment_start, _segment_end = self.segment_source_refs[traj_idx]
         absolute_start = int(rgb_source["segment_start_idx"])
-        absolute_indices = [absolute_start + int(idx) for idx in indices]
+        source_last_idx = int(rgb_source["source_length"]) - 1
+        absolute_indices = [
+            min(absolute_start + int(idx), source_last_idx)
+            for idx in indices
+        ]
         h5_file = self._get_handle(file_path)
         traj_group = h5_file if traj_key is None else h5_file[traj_key]
         return _read_rgb_frames(traj_group["obs"], rgb_source, absolute_indices)
@@ -770,15 +889,24 @@ class CPIQLTrajectoryDataset(BaseTrajectoryDataset):
             act_seq = self.action_data[traj_idx][max(0, start):end]
             if start < 0:
                 act_seq = torch.cat([act_seq[0].repeat(-start, 1), act_seq], dim=0)
-            if len(act_seq) < self.pred_horizon:
-                act_seq = torch.cat([act_seq, act_seq[-1].unsqueeze(0).repeat(self.pred_horizon - len(act_seq), 1)], dim=0)
             if self.agent_control_mode != self.env_metas[traj_idx]["env_control_mode"]:
                 act_seq = self._transform_action_sequence(traj_idx, start, act_seq)
+            if len(act_seq) < self.pred_horizon:
+                pad_vec = compute_pad_vec(act_seq, self.is_abs_mode, self.pad_action_arm)
+                act_seq = torch.cat(
+                    [act_seq, pad_vec.unsqueeze(0).repeat(self.pred_horizon - len(act_seq), 1)],
+                    dim=0,
+                )
             data["action"] = act_seq
 
-        reward, discount = compute_n_step_progress_signals(self.rewards[traj_idx], self.gammas[traj_idx], idx, self.act_horizon)
-        boundary_window = slice(idx, min(idx + self.act_horizon + 1, length))
-        terminated = bool(np.any(self.success[traj_idx][boundary_window] | self.terminated[traj_idx][boundary_window] | self.truncated[traj_idx][boundary_window]))
+        terminal_flags = self.success[traj_idx] | self.terminated[traj_idx] | self.truncated[traj_idx]
+        reward, discount, terminated = compute_n_step_progress_signals(
+            self.rewards[traj_idx],
+            self.gammas[traj_idx],
+            terminal_flags,
+            idx,
+            self.act_horizon,
+        )
 
         if "reward" in self.required_keys:
             data["reward"] = reward.reshape(1)

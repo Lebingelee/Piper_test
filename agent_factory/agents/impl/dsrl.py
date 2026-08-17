@@ -201,6 +201,7 @@ class DSRLAgent(MainMixin, DSRLActorMixin, DSRLCriticMixin, BaseAgent):
         内部执行 Diffusion Policy 的预训练 (BC)
         """
         from agent_factory.agents.registry import make_agent, get_default_config
+        from agent_factory.config.resolution import general_resolve
         import os
         from omegaconf import OmegaConf
 
@@ -225,14 +226,15 @@ class DSRLAgent(MainMixin, DSRLActorMixin, DSRLCriticMixin, BaseAgent):
         base_cfg.actor.encoder = self.cfg.actor.encoder
         
         # 针对 Agent_SP 的对齐
-        base_cfg.agent_sp.iters = self.cfg.agent_sp.pretrain_iters
         base_cfg.agent_sp.save_dir = self.cfg.agent_sp.save_dir
         base_cfg.agent_sp.exp_name = f"{self.cfg.agent_sp.exp_name or 'dsrl'}_pretrain"
+        base_cfg.train.actor_iters = self.cfg.agent_sp.pretrain_iters
 
+        base_cfg, _runtime_spec = general_resolve(file_config=base_cfg)
         base_agent = make_agent(base_agent_type, base_cfg)
         
         # 2. 开始预训练
-        print(f"[DSRL Pre-train] Starting BC training for {base_cfg.agent_sp.iters} steps...")
+        print(f"[DSRL Pre-train] Starting BC training for {base_cfg.train.actor_iters} steps...")
         
 
         # 3. 记录产出的权重路径并回填到当前配置

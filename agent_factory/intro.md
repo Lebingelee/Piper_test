@@ -70,7 +70,8 @@
 - `env_factories.py`：按 `cfg.env.library` 构建环境（当前包含 `mani_skill`、`realman`、`gymnasium`）。
 - `wrappers.py`：
   - `MetadataAdapterWrapper`：基于 `meta_keys` 把分层 obs/action 转成扁平张量接口。
-  - `ManiSkillAdapterWrapper` / `GymnasiumAdapterWrapper`。
+  - `GymnasiumAdapterWrapper`。ManiSkill 的原始契约适配位于
+    `agent_infra/maniskill_env`；`ManiSkillAdapterWrapper` 只为迁移期外部调用保留。
   - `UnifiedFrameStackWrapper`：统一时序堆叠。
 
 作用：把不同环境的数据格式对齐到 agent 可消费的统一格式。

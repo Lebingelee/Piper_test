@@ -1,6 +1,44 @@
 import torch
 from ...data.normalization import get_action_normalizer
 
+
+class ObsNormMixin:
+    """
+    State observation normalization mixin.
+
+    SmolVLA only normalizes the flat proprio/state vector here. Images keep the
+    model-side [-1, 1] preprocessing implemented by LeRobot SmolVLA itself.
+    """
+
+    def _init_obs_normalizer(self):
+        norm_cfg = getattr(self.cfg.actor, "obs_norm", None)
+        norm_type = getattr(norm_cfg, "type", None) if norm_cfg else None
+        norm_params = {}
+        if norm_cfg and hasattr(norm_cfg, "params") and norm_cfg.params:
+            norm_params = norm_cfg.params
+
+        state_dim = self.cfg.env.proprio_dim
+        self.obs_normalizer = get_action_normalizer(
+            norm_type=norm_type,
+            action_dim=state_dim,
+            **norm_params,
+        ).to(self.device)
+
+        print(f"[ObsNormMixin] Initialized state normalizer with type: {norm_type}")
+
+    def normalize_obs_state(self, state: torch.Tensor) -> torch.Tensor:
+        return self.obs_normalizer.normalize(state.float())
+
+    def denormalize_obs_state(self, state: torch.Tensor) -> torch.Tensor:
+        return self.obs_normalizer.denormalize(state.float())
+
+    def fit_obs_normalizer(self, raw_states: torch.Tensor):
+        if raw_states.ndim > 2:
+            raw_states = raw_states.reshape(-1, raw_states.shape[-1])
+        self.obs_normalizer.fit(raw_states.float())
+        print("[ObsNormMixin] Fit completed. State normalizer is now ready.")
+
+
 class ActionNormMixin:
     """
     动作归一化 Mixin。

@@ -8,6 +8,7 @@ import numpy as np
 from omegaconf import DictConfig
 
 from agent_factory.runner.base_runner import BaseRunner
+from agent_factory.runner.config_utils import runner_config_get
 
 
 class RunnerState(str, Enum):
@@ -33,8 +34,12 @@ class HITLRunner(BaseRunner):
         self.state: RunnerState = RunnerState.POLICY
         self.prev_state: RunnerState = RunnerState.POLICY
 
-        self.override_key: str = str(getattr(cfg.runner, "hitl_override_key", "t")).lower()
-        self.teleop_key: str = str(getattr(cfg.runner, "hitl_teleop_key", "t")).lower()
+        self.override_key: str = str(
+            runner_config_get(cfg, "hitl_override_key", "t")
+        ).lower()
+        self.teleop_key: str = str(
+            runner_config_get(cfg, "hitl_teleop_key", "t")
+        ).lower()
         self.override_active: bool = False
         self._override_lock = threading.Lock()
 
@@ -79,6 +84,9 @@ class HITLRunner(BaseRunner):
             except Exception as exc:
                 print(f"[HITLRunner] env teleop toggle failed: {exc}")
                 return False
+        if hasattr(base_env, "tele_enabled"):
+            base_env.tele_enabled = not bool(base_env.tele_enabled)
+            return True
         return False
 
     def _read_override_flag(self) -> bool:
@@ -92,7 +100,12 @@ class HITLRunner(BaseRunner):
                 return bool(base_env.get_env_state("teleop"))
             except (KeyError, AttributeError, TypeError, ValueError):
                 pass
-        return False
+        if hasattr(base_env, "is_teleop_enabled"):
+            try:
+                return bool(base_env.is_teleop_enabled())
+            except Exception:
+                pass
+        return bool(getattr(base_env, "tele_enabled", False))
 
     def _align_action_dim(self, action: np.ndarray) -> np.ndarray:
         """

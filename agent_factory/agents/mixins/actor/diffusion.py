@@ -1,18 +1,36 @@
 import torch
 from ..normalization_mixins import ActionNormMixin
+from ..module_builder import ModuleBuilderMixin
 from agent_factory.modules.actors.diffusion import VanillaDiffusionPolicy, ConditionalDiffusionPolicy
-from agent_factory.modules.encoders.state_encoder import BaseStateEncoder
-from agent_factory.modules.encoders.visual_encoder import VisualEncoder
 from agent_factory.config.structure import DiffusionActorConfig
 
 
-class DiffusionActorMixin(ActionNormMixin):
+class DiffusionActorMixin(ModuleBuilderMixin, ActionNormMixin):
     """
     Mixin: 为 Agent 提供 Diffusion Policy 的构建、训练和推理能力。
     """
 
     CONFIG_CLASS = DiffusionActorConfig
     CONFIG_KEY = "actor"
+    RESOLVE_RULES = {
+        "action_dim": {
+            "source": "env.action_dim",
+            "kind": "derived",
+            "required": True,
+        },
+    }
+    VALIDATION_RULES = {
+        "obs_horizon": {
+            "source": "env.obs_horizon",
+            "kind": "protocol",
+            "on_conflict": "warn",
+        },
+        "pred_horizon": {
+            "source": "env.pred_horizon",
+            "kind": "protocol",
+            "on_conflict": "warn",
+        },
+    }
     # 声明：我训练 Diffusion 需要这些数据
     REQUIRED_KEYS = {"observations", "action"}
 
@@ -26,22 +44,7 @@ class DiffusionActorMixin(ActionNormMixin):
         # --- 初始化归一化器 ---
         self._init_action_normalizer()
 
-        # 1. 准备 Encoder (Actor 独享)
-        # 注意：这里假设 Config 结构已经对齐
-        visual_encoder = VisualEncoder(
-            in_channels=cfg.encoder.visual.in_channels,
-            out_dim=cfg.encoder.visual.out_dim,
-            backbone_type=cfg.encoder.visual.backbone_type,
-            pool_feature_map=cfg.encoder.visual.pool_feature_map,
-            use_group_norm=cfg.encoder.visual.use_group_norm
-        )
-        
-        self.actor_encoder = BaseStateEncoder(
-            visual_encoder=visual_encoder,
-            proprio_dim=self.cfg.env.proprio_dim,
-            out_dim=cfg.encoder.out_dim,
-            num_cameras=self.cfg.env.num_cameras
-        )
+        self.actor_encoder = self._build_encoder_from_config(cfg.encoder)
         
         common_args = dict(
             state_encoder=self.actor_encoder,

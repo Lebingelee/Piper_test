@@ -1,11 +1,31 @@
 import torch
 import torch.nn as nn
 from einops import rearrange
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 # 引用上面的 VisualEncoder 和 make_mlp
 # 在实际项目中建议使用: from .visual_encoder import VisualEncoder, make_mlp
 from agent_factory.modules.encoders.visual_encoder import VisualEncoder, make_mlp
+from agent_factory.modules.registry import module_cfg_get, register_module
+
+
+CNN_STATE_ENCODER_RESOLVE_RULES = {
+    "proprio_dim": {
+        "source": "env.proprio_dim",
+        "required": True,
+    },
+    "num_cameras": {
+        "source": "env.num_cameras",
+        "required": False,
+        "default": 1,
+    },
+    "include_rgb": {
+        "source": "dataset.include_rgb",
+        "required": False,
+        "default": True,
+    },
+}
+
 
 class BaseStateEncoder(nn.Module):
     """
@@ -104,3 +124,41 @@ class BaseStateEncoder(nn.Module):
         
         # 恢复维度 [B, T, out_dim]
         return rearrange(embedding_flat, '(b t) d -> b t d', b=b, t=t)
+
+
+@register_module("CNN_state_encoder")
+def build_cnn_state_encoder(
+    encoder_cfg: Any,
+    **_kwargs,
+) -> BaseStateEncoder:
+    """
+    Build the default CNN-backed BaseStateEncoder from a config object.
+
+    All construction fields live on encoder_cfg so callers can use the universal
+    make_module(config) path without passing agent-specific context.
+    """
+
+    include_rgb = bool(module_cfg_get(encoder_cfg, "include_rgb", True))
+    visual_cfg = module_cfg_get(encoder_cfg, "visual", None)
+    vis_enc = None
+    if include_rgb and visual_cfg is not None:
+        vis_enc = VisualEncoder(
+            in_channels=int(module_cfg_get(visual_cfg, "in_channels", 3)),
+            out_dim=int(module_cfg_get(visual_cfg, "out_dim", 256)),
+            backbone_type=str(module_cfg_get(visual_cfg, "backbone_type", "plain")),
+            pool_feature_map=bool(module_cfg_get(visual_cfg, "pool_feature_map", True)),
+            use_group_norm=bool(module_cfg_get(visual_cfg, "use_group_norm", True)),
+        )
+
+    return BaseStateEncoder(
+        visual_encoder=vis_enc,
+        proprio_dim=int(module_cfg_get(encoder_cfg, "proprio_dim", 0) or 0),
+        out_dim=int(module_cfg_get(encoder_cfg, "out_dim", 256)),
+        hidden_dims=list(module_cfg_get(encoder_cfg, "hidden_dims", [256])),
+        visual_feature_dim=int(module_cfg_get(visual_cfg, "out_dim", 256)) if vis_enc is not None else None,
+        num_cameras=int(module_cfg_get(encoder_cfg, "num_cameras", 1)),
+        view_fusion=str(module_cfg_get(encoder_cfg, "view_fusion", "concat")),
+    )
+
+
+build_cnn_state_encoder.RESOLVE_RULES = CNN_STATE_ENCODER_RESOLVE_RULES

@@ -33,6 +33,11 @@ def load_config(
         cli_cfg = OmegaConf.from_dotlist(cli_args)
         override_cfg = OmegaConf.merge(override_cfg, cli_cfg)
 
+    override_dict = OmegaConf.to_container(override_cfg, resolve=False)
+    if isinstance(override_dict, dict):
+        override_dict = ConfigManager._resolve_dataset_defaults(override_dict)
+        override_cfg = OmegaConf.create(override_dict)
+
     base_cfg = OmegaConf.merge(base_cfg, override_cfg)
     
     # 3. 解析环境默认配置（例如 piper config），并保持用户覆盖优先

@@ -18,85 +18,58 @@ _SEMANTIC_CONTROL_MODES = {
     "delta_joint",
     "relative_pose_chunk",
 }
+_RUNNER_SHARED_KEYS = {
+    "type",
+    "control_hz",
+    "buffer_capacity",
+    "redundancy_margin",
+    "save_dir",
+    "no_safe_action_gap",
+    "planning_wait_sleep",
+    "config_path",
+    "config",
+}
+_RUNNER_LEGACY_CONFIG_KEYS = {
+    "hitl_enabled",
+    "hitl_override_key",
+    "hitl_teleop_key",
+    "hitl_source",
+    "hitl_finalize_intervention",
+    "risk_check_hz",
+    "risk_use_safe_action",
+    "deploy_start_key",
+    "deploy_stop_key",
+    "deploy_continue_key",
+    "deploy_init_key",
+    "deploy_quit_key",
+    "deploy_teleop_key",
+    "deploy_save_key",
+}
+_DATASET_SHARED_KEYS = {
+    "dataset_type",
+    "include_rgb",
+    "include_depth",
+    "config_path",
+    "config",
+    "expert",
+    "replaybuffer",
+    "replay",
+}
+_DEFAULT_RUNNER_CONFIG_PATHS = {
+    "base": "agent_factory/runner/config/base.yaml",
+    "sim": "agent_factory/runner/config/sim.yaml",
+    "pi05": "agent_factory/runner/config/base.yaml",
+    "hitl": "agent_factory/runner/config/hitl.yaml",
+    "hitl_deploy": "agent_factory/runner/config/hitl_deploy.yaml",
+}
 
 class ConfigManager:
     """
-    配置管理中心：负责配置的 校验、保存、读取。
+    配置管理中心：负责配置保存、读取和旧格式默认值归一化。
+
+    参数一致性检查由 agent_factory.config.resolution.general_resolve()
+    结合 module / mixin 声明规则负责。
     """
-
-    @staticmethod
-    def check_consistency(cfg) -> bool:
-        """
-        核心校验逻辑：检测 Env, Dataset, Actor 之间的参数是否冲突。
-        在实例化 Agent 之前必须调用此函数。
-        """
-        logger.info("Starting Configuration Consistency Check...")
-
-        def _get(path: str, default=None):
-            """Safely read config values from DictConfig/Dataclass/Dict."""
-            try:
-                return OmegaConf.select(cfg, path, default=default)
-            except Exception:
-                return default
-
-        actor_cfg = _get("actor", None)
-        critic_cfg = _get("critic", None)
-        
-        # --- 1. Horizon Consistency (时间步一致性) ---
-        # Obs Horizon: Env vs Dataset vs Actor
-        env_oh = _get("env.obs_horizon", None)
-        dataset_oh = _get("dataset.obs_horizon", None)
-        actor_oh = _get("actor.obs_horizon", None)
-        if dataset_oh is not None and env_oh is not None and dataset_oh != env_oh:
-            raise ValueError(f"[Horizon Mismatch] Env obs_horizon({env_oh}) != Dataset({dataset_oh})")
-        if actor_oh is not None and env_oh is not None and actor_oh != env_oh:
-            raise ValueError(f"[Horizon Mismatch] Env obs_horizon({env_oh}) != Actor({actor_oh})")
-
-        # Pred Horizon: Dataset vs Actor
-        dataset_ph = _get("dataset.pred_horizon", None)
-        actor_ph = _get("actor.pred_horizon", None)
-        if actor_ph is not None and dataset_ph is not None and dataset_ph != actor_ph:
-            raise ValueError(f"[Horizon Mismatch] Dataset pred_horizon({dataset_ph}) != Actor({actor_ph})")
-
-        # --- 2. Dimension Consistency (维度一致性) ---
-        # Action Dim
-        env_action_dim = _get("env.action_dim", None)
-        actor_action_dim = _get("actor.action_dim", None)
-        require_match = bool(_get("actor.require_env_action_dim_match", True))
-        if actor_cfg is not None and require_match and env_action_dim is not None and actor_action_dim is not None:
-            if env_action_dim != actor_action_dim:
-                raise ValueError(f"[Dim Mismatch] Env action_dim({env_action_dim}) != Actor({actor_action_dim})")
-
-        # Proprio Dim (本体感知维度)
-        # 注意：通常由 Dataset 动态计算后回填，这里检查回填后的结果
-        env_pd = _get("env.proprio_dim", None)
-        
-        if env_pd is not None:
-            if actor_cfg is not None:
-                actor_pd = _get("actor.encoder.proprio_dim", None)
-                if actor_pd != env_pd:
-                    raise ValueError(f"[Dim Mismatch] Env proprio_dim({env_pd}) != Actor Encoder({actor_pd})")
-            if critic_cfg is not None:
-                critic_pd = _get("critic.encoder.proprio_dim", None)
-                if critic_pd != env_pd:
-                    raise ValueError(f"[Dim Mismatch] Env proprio_dim({env_pd}) != Critic Encoder({critic_pd})")
-
-        # --- 3. Observation Mode Logic (模式一致性) ---
-        mode = _get("env.obs_mode", "rgb")
-        inc_rgb = bool(_get("dataset.include_rgb", True))
-        inc_depth = bool(_get("dataset.include_depth", False))
-
-        if mode == 'rgb' and not inc_rgb:
-            raise ValueError(f"[Mode Conflict] Env obs_mode='rgb' but Dataset include_rgb=False")
-        if mode == 'depth' and not inc_depth:
-            raise ValueError(f"[Mode Conflict] Env obs_mode='depth' but Dataset include_depth=False")
-        if mode == 'rgbd' and not (inc_rgb and inc_depth):
-            raise ValueError(f"[Mode Conflict] Env obs_mode='rgbd' but Dataset missing rgb/depth")
-        if mode == 'state' and (inc_rgb or inc_depth):
-            logger.warning(f"[Mode Warning] Env obs_mode='state' but Dataset includes visual keys. Check efficiency.")
-
-        logger.info("Configuration Check Passed. All systems go.")
-        return True
 
     @staticmethod
     def save_config(cfg: Any, save_dir: str, filename: str = "config.yaml"):
@@ -133,6 +106,110 @@ class ConfigManager:
         if os.path.isabs(path):
             return path
         return os.path.join(ConfigManager._project_root(), path)
+
+    @staticmethod
+    def _load_yaml_dict(path: str) -> Dict[str, Any]:
+        if not path:
+            return {}
+        abs_path = ConfigManager._resolve_config_path(path)
+        if not os.path.exists(abs_path):
+            raise FileNotFoundError(f"Config path not found: {abs_path}")
+        with open(abs_path, "r", encoding="utf-8") as f:
+            loaded = yaml.safe_load(f) or {}
+        return loaded if isinstance(loaded, dict) else {}
+
+    @staticmethod
+    def _resolve_runner_defaults(cfg_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Normalize runner configuration before structured merge.
+
+        Public runner fields stay small and shared. Runner-specific knobs live in
+        runner.config and are populated from runner.config_path, with inline
+        runner.config overriding file defaults.
+        """
+        runner_cfg = cfg_dict.setdefault("runner", {})
+        if not isinstance(runner_cfg, dict):
+            cfg_dict["runner"] = {}
+            runner_cfg = cfg_dict["runner"]
+
+        runner_type = str(runner_cfg.get("type") or "base").strip() or "base"
+        runner_cfg["type"] = runner_type
+        config_path = runner_cfg.get("config_path") or _DEFAULT_RUNNER_CONFIG_PATHS.get(
+            runner_type,
+            _DEFAULT_RUNNER_CONFIG_PATHS["base"],
+        )
+        runner_cfg["config_path"] = ConfigManager._resolve_config_path(str(config_path))
+
+        inline_config = runner_cfg.get("config") or {}
+        if not isinstance(inline_config, dict):
+            inline_config = {}
+
+        try:
+            file_config = ConfigManager._load_yaml_dict(runner_cfg["config_path"])
+        except FileNotFoundError:
+            if inline_config:
+                logger.warning(
+                    "Runner config_path not found, using inline runner.config only: %s",
+                    runner_cfg["config_path"],
+                )
+                file_config = {}
+            else:
+                raise
+
+        merged_config = dict(file_config)
+        merged_config.update(inline_config)
+
+        for key in list(runner_cfg.keys()):
+            if key in _RUNNER_LEGACY_CONFIG_KEYS:
+                merged_config.setdefault(key, runner_cfg.pop(key))
+            elif key not in _RUNNER_SHARED_KEYS:
+                merged_config.setdefault(key, runner_cfg.pop(key))
+
+        runner_cfg["config"] = merged_config
+        return cfg_dict
+
+    @staticmethod
+    def _resolve_dataset_defaults(cfg_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Normalize dataset-specific configuration before structured merge.
+
+        Public dataset fields remain shared across dataset types. Dataset-type
+        specific knobs live in dataset.config and can be populated from
+        dataset.config_path, with inline dataset.config overriding file defaults.
+        """
+        dataset_cfg = cfg_dict.setdefault("dataset", {})
+        if not isinstance(dataset_cfg, dict):
+            cfg_dict["dataset"] = {}
+            dataset_cfg = cfg_dict["dataset"]
+
+        config_path = str(dataset_cfg.get("config_path") or "").strip()
+        inline_config = dataset_cfg.get("config") or {}
+        if not isinstance(inline_config, dict):
+            inline_config = {}
+
+        file_config: Dict[str, Any] = {}
+        if config_path:
+            resolved_path = ConfigManager._resolve_config_path(config_path)
+            dataset_cfg["config_path"] = resolved_path
+            loaded = ConfigManager._load_yaml_dict(resolved_path)
+            loaded_dataset = loaded.get("dataset") if isinstance(loaded.get("dataset"), dict) else None
+            if loaded_dataset is not None:
+                if isinstance(loaded_dataset.get("config"), dict):
+                    file_config.update(loaded_dataset["config"])
+                for key, value in loaded_dataset.items():
+                    if key not in _DATASET_SHARED_KEYS:
+                        file_config[key] = value
+            else:
+                file_config.update(loaded)
+
+        for key in list(dataset_cfg.keys()):
+            if key not in _DATASET_SHARED_KEYS:
+                inline_config.setdefault(key, dataset_cfg.pop(key))
+
+        merged_config = dict(file_config)
+        merged_config.update(inline_config)
+        dataset_cfg["config"] = merged_config
+        return cfg_dict
 
     @staticmethod
     def _infer_piper_dims(env_cfg: Dict[str, Any], piper_cfg: Dict[str, Any]) -> Dict[str, int]:
@@ -229,6 +306,8 @@ class ConfigManager:
 
         if library == "piper" and not config_path:
             config_path = "agent_infra/Piper_Env/Config/piper_config.yaml"
+        elif library == "robosuite" and not config_path:
+            config_path = "agent_infra/robosuite_env/Config/lift_panda_state.yaml"
 
         loaded_cfg = {}
         if isinstance(config_path, str) and config_path.strip():
@@ -293,7 +372,77 @@ class ConfigManager:
                 if not ConfigManager._dict_has_path(user_dict, ["env", key]):
                     env_cfg[key] = val
 
-        if library == "mani_skill" and not ConfigManager._dict_has_path(user_dict, ["env", "env_control_mode"]):
+        if library == "robosuite" and isinstance(loaded_cfg, dict):
+            common_cfg = loaded_cfg.get("common", {}) or {}
+            task_cfg = loaded_cfg.get("task", {}) or {}
+            action_cfg = loaded_cfg.get("action", {}) or {}
+            controller_cfg = loaded_cfg.get("controller", {}) or {}
+            robot_cfg = loaded_cfg.get("robot", {}) or {}
+            contract_cfg = loaded_cfg.get("contract", {}) or {}
+            rollout_cfg = loaded_cfg.get("rollout", {}) or {}
+
+            if not ConfigManager._dict_has_path(user_dict, ["env", "env_control_mode"]):
+                env_cfg["env_control_mode"] = canonicalize_control_mode(
+                    action_cfg.get("env_control_mode") or "absolute_pose"
+                )
+            if not ConfigManager._dict_has_path(user_dict, ["env", "controller_backend"]):
+                env_cfg["controller_backend"] = str(
+                    action_cfg.get("controller_backend")
+                    or controller_cfg.get("name")
+                    or robot_cfg.get("default_controller")
+                    or ""
+                )
+            if not ConfigManager._dict_has_path(user_dict, ["runner", "control_hz"]):
+                control_hz = common_cfg.get("default_hz", task_cfg.get("control_freq"))
+                if control_hz is not None:
+                    cfg_dict.setdefault("runner", {})["control_hz"] = int(control_hz)
+            if not ConfigManager._dict_has_path(user_dict, ["env", "max_episode_steps"]):
+                horizon = rollout_cfg.get("benchmark_horizon", task_cfg.get("horizon"))
+                if horizon is not None:
+                    env_cfg["max_episode_steps"] = int(horizon)
+
+            for key in ("action_dim", "proprio_dim", "num_cameras", "obs_mode"):
+                if key in contract_cfg and not ConfigManager._dict_has_path(user_dict, ["env", key]):
+                    env_cfg[key] = contract_cfg[key]
+
+        if library == "mani_skill" and isinstance(loaded_cfg, dict):
+            task_cfg = loaded_cfg.get("task", {}) or {}
+            action_cfg = loaded_cfg.get("action", {}) or {}
+            contract_cfg = loaded_cfg.get("contract", {}) or {}
+            if not ConfigManager._dict_has_path(user_dict, ["env", "env_id"]):
+                env_id = task_cfg.get("env_id")
+                if env_id:
+                    env_cfg["env_id"] = str(env_id)
+            if not ConfigManager._dict_has_path(user_dict, ["env", "control_mode"]):
+                control_mode = action_cfg.get("control_mode")
+                if control_mode:
+                    env_cfg["control_mode"] = str(control_mode)
+            if not ConfigManager._dict_has_path(user_dict, ["env", "env_control_mode"]):
+                env_mode = action_cfg.get("env_control_mode")
+                if env_mode:
+                    env_cfg["env_control_mode"] = canonicalize_control_mode(env_mode)
+            if not ConfigManager._dict_has_path(user_dict, ["env", "controller_backend"]):
+                backend = action_cfg.get("control_mode")
+                if backend:
+                    env_cfg["controller_backend"] = str(backend)
+            if not ConfigManager._dict_has_path(user_dict, ["env", "max_episode_steps"]):
+                horizon = task_cfg.get("max_episode_steps")
+                if horizon is not None:
+                    env_cfg["max_episode_steps"] = int(horizon)
+            for key in ("action_dim", "proprio_dim", "num_cameras", "obs_mode"):
+                if key in contract_cfg and not ConfigManager._dict_has_path(user_dict, ["env", key]):
+                    env_cfg[key] = contract_cfg[key]
+
+        has_maniskill_config_mode = (
+            library == "mani_skill"
+            and isinstance(loaded_cfg, dict)
+            and bool((loaded_cfg.get("action", {}) or {}).get("env_control_mode"))
+        )
+        if (
+            library == "mani_skill"
+            and not has_maniskill_config_mode
+            and not ConfigManager._dict_has_path(user_dict, ["env", "env_control_mode"])
+        ):
             env_cfg["env_control_mode"] = canonicalize_control_mode(
                 env_cfg.get("control_mode") or "pd_ee_delta_pose"
             )
@@ -338,6 +487,8 @@ class ConfigManager:
             if "base_policy" in agent_sp_cfg:
                 agent_sp_cfg["base_policy"] = _normalize_base_policy_cfg(agent_sp_cfg.get("base_policy"))
 
+            user_dict = ConfigManager._resolve_runner_defaults(user_dict)
+            user_dict = ConfigManager._resolve_dataset_defaults(user_dict)
             user_cfg = OmegaConf.create(user_dict)
         else:
             user_dict = {}
@@ -354,4 +505,9 @@ class ConfigManager:
         """读取 YAML 配置并返回 DictConfig 对象"""
         # OmegaConf.load 返回的对象既可以像字典一样 cfg['key'] 访问，
         # 也可以像对象一样 cfg.key 访问，非常方便
-        return OmegaConf.load(path)
+        cfg_dict = OmegaConf.to_container(OmegaConf.load(path), resolve=False)
+        if isinstance(cfg_dict, dict):
+            cfg_dict = ConfigManager._resolve_runner_defaults(cfg_dict)
+            cfg_dict = ConfigManager._resolve_dataset_defaults(cfg_dict)
+            return OmegaConf.create(cfg_dict)
+        return OmegaConf.create(cfg_dict)

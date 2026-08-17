@@ -2,6 +2,7 @@ import os
 from dataclasses import dataclass
 from typing import Optional
 
+import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -43,6 +44,86 @@ class DiffusionCPIQLDACAgent(MainMixin, CPIQLDACActorMixin, CPIQLCriticMixin, Ba
 
     def _init_optimizers(self):
         pass
+
+    @staticmethod
+    def _summarize_prefixes(keys):
+        counts = {}
+        for key in keys:
+            prefix = str(key).split(".", 1)[0]
+            counts[prefix] = counts.get(prefix, 0) + 1
+        return ", ".join(f"{key}={value}" for key, value in sorted(counts.items())) or "none"
+
+    def _load_legacy_cpiql_dac_checkpoint(self, path: str):
+        payload = torch.load(path, map_location=self.device, weights_only=False)
+        state = payload.get("model", payload)
+        if not isinstance(state, dict):
+            raise TypeError(f"Checkpoint {path} does not contain a model state dict.")
+
+        current_state = self.state_dict()
+        compatible_state = {}
+        skipped_unexpected = []
+        skipped_shape = []
+        for key, value in state.items():
+            if key not in current_state:
+                skipped_unexpected.append(key)
+                continue
+            if tuple(value.shape) != tuple(current_state[key].shape):
+                skipped_shape.append(key)
+                continue
+            compatible_state[key] = value
+
+        missing_after_filter = [
+            key for key in current_state
+            if key not in compatible_state
+        ]
+        critical_prefixes = (
+            "actor.",
+            "actor_encoder.",
+            "ema_actor.",
+            "action_normalizer.",
+            "dac_",
+        )
+        missing_critical = [
+            key for key in missing_after_filter
+            if key.startswith(critical_prefixes)
+        ]
+        if missing_critical:
+            raise RuntimeError(
+                "Legacy CPIQL-DAC checkpoint load would miss actor-critical "
+                f"parameters: {missing_critical[:20]}"
+            )
+
+        self.load_state_dict(compatible_state, strict=False)
+        self.step = payload.get("step", 0) if isinstance(payload, dict) else 0
+        print(
+            "[DiffusionCPIQLDACAgent] Legacy-compatible checkpoint loaded. "
+            f"loaded={len(compatible_state)}, "
+            f"missing_new_critic={len(missing_after_filter)}, "
+            f"skipped_legacy_critic={len(skipped_unexpected)}, "
+            f"skipped_shape={len(skipped_shape)}"
+        )
+        print(
+            "[DiffusionCPIQLDACAgent] Skipped legacy prefixes: "
+            f"{self._summarize_prefixes(skipped_unexpected)}"
+        )
+        if skipped_shape:
+            print(
+                "[DiffusionCPIQLDACAgent] Skipped shape-mismatch prefixes: "
+                f"{self._summarize_prefixes(skipped_shape)}"
+            )
+        print(f"[DiffusionCPIQLDACAgent] Loaded checkpoint from {path} (Step {self.step})")
+        return payload.get("meta", {}) if isinstance(payload, dict) else {}
+
+    def load(self, path: str):
+        try:
+            return super().load(path)
+        except RuntimeError as exc:
+            print(
+                "[DiffusionCPIQLDACAgent] Strict checkpoint load failed; "
+                "trying legacy CPIQL-DAC actor-compatible load. "
+                f"Reason: {exc.__class__.__name__}: {str(exc).splitlines()[0]}"
+            )
+            return self._load_legacy_cpiql_dac_checkpoint(path)
 
     def update(self, batch: dict) -> dict:
         self.step += 1

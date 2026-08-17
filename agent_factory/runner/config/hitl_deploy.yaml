@@ -1,0 +1,14 @@
+hitl_enabled: true
+hitl_override_key: t
+hitl_teleop_key: t
+hitl_source: keyboard
+hitl_finalize_intervention: true
+risk_check_hz: 0.0
+risk_use_safe_action: true
+deploy_start_key: s
+deploy_stop_key: e
+deploy_continue_key: c
+deploy_init_key: i
+deploy_quit_key: q
+deploy_teleop_key: t
+deploy_save_key: s

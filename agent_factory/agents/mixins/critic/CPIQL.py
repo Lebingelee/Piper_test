@@ -6,11 +6,10 @@ import torch
 import torch.nn.functional as F
 
 from agent_factory.agents.mixins.critic.base_eval import CriticEvalMixinBase
+from agent_factory.agents.mixins.module_builder import ModuleBuilderMixin
 from agent_factory.config.structure import StateEncoderConfig
 from agent_factory.modules.critics.cpiql_critic import CPIQLQNet, CPIQLVNet
-from agent_factory.modules.encoders.state_encoder import BaseStateEncoder
-from agent_factory.modules.encoders.visual_encoder import VisualEncoder
-
+SET_CLASS_BALANCE_WEIGHT = False
 
 @dataclass
 class CPIQLCriticConfig:
@@ -20,11 +19,14 @@ class CPIQLCriticConfig:
     q_lr: float = 3e-4
     v_lr: float = 3e-4
     expectile: float = 0.7
-    k_embed_dim: int = 16
-    k_hidden_dims: List[int] = field(default_factory=lambda: [32])
     k_grid: List[float] = field(default_factory=lambda: [0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
+    gamma_default_mode: str = "one_minus_margin_over_max_episode_steps"
+    gamma_default_margin: float = 2.0
+    gamma_use_act_horizon_power: bool = True
+    gamma_mode: str = "constant"
     gamma_floor: float = 1e-4
     alpha_progress: float = 1.0
+    family_progress_anchor: bool = True
     lambda_mono: float = 0.05
     lambda_smooth: float = 0.0
     intervention_terminal_reward: float = 0.2
@@ -36,14 +38,13 @@ class CPIQLCriticConfig:
     success_progress_weight: float = 1.0
     failure_progress_weight: float = 1.0
     anchor_intervention_pseudo: bool = False
-    use_per_k_backward: bool = False
     num_k_samples: Any = "all"
     grad_clip_norm: float = 0.0
     target_update_interval: int = 1
     log_interval: int = 100
 
 
-class CPIQLCriticMixin(CriticEvalMixinBase):
+class CPIQLCriticMixin(ModuleBuilderMixin, CriticEvalMixinBase):
     """
     Failure-Conditioned Progress IQL critic.
 
@@ -174,36 +175,14 @@ class CPIQLCriticMixin(CriticEvalMixinBase):
     }
 
     def _build_critic(self):
+        self._resolve_critic_default_gamma()
         cfg = self.cfg.critic
-        encoder_cfg = cfg.encoder
-        use_visual = getattr(self.cfg.dataset, "include_rgb", True)
-
-        vis_enc = None
-        if use_visual:
-            vis_enc = VisualEncoder(
-                in_channels=encoder_cfg.visual.in_channels,
-                out_dim=encoder_cfg.visual.out_dim,
-                backbone_type=encoder_cfg.visual.backbone_type,
-                pool_feature_map=encoder_cfg.visual.pool_feature_map,
-                use_group_norm=encoder_cfg.visual.use_group_norm,
-            )
-
-        proprio_dim = encoder_cfg.proprio_dim or self.cfg.env.proprio_dim
-        self.critic_encoder = BaseStateEncoder(
-            visual_encoder=vis_enc,
-            proprio_dim=proprio_dim,
-            out_dim=encoder_cfg.out_dim,
-            visual_feature_dim=encoder_cfg.visual.out_dim if vis_enc is not None else None,
-            num_cameras=self.cfg.env.num_cameras,
-            view_fusion=encoder_cfg.view_fusion,
-        )
+        self.critic_encoder = self._build_encoder_from_config(cfg.encoder)
 
         common_args = dict(
             state_encoder=self.critic_encoder,
             obs_horizon=self.cfg.env.obs_horizon,
             hidden_dims=cfg.hidden_dims,
-            k_embed_dim=cfg.k_embed_dim,
-            k_hidden_dims=cfg.k_hidden_dims,
             k_grid=self._k_values(),
         )
 
@@ -212,7 +191,7 @@ class CPIQLCriticMixin(CriticEvalMixinBase):
         self.q_net = CPIQLQNet(flat_action_dim=flat_action_dim, **common_args)
         self.target_q_net = copy.deepcopy(self.q_net)
         self.target_q_net.requires_grad_(False)
-        self.use_per_k_backward = False
+        self.use_blance_weight = bool(SET_CLASS_BALANCE_WEIGHT)
         self.success_class_weight = 1.0
         self.failure_class_weight = 1.0
         self.k0_success_count = 0
@@ -220,6 +199,29 @@ class CPIQLCriticMixin(CriticEvalMixinBase):
 
         self.v_optimizer = torch.optim.AdamW(self.v_net.parameters(), lr=cfg.v_lr)
         self.q_optimizer = torch.optim.AdamW(self.q_net.parameters(), lr=cfg.q_lr)
+
+    def _resolve_critic_default_gamma(self) -> float:
+        raw_gamma = getattr(self.cfg.env, "gamma", 0.99)
+        if isinstance(raw_gamma, str):
+            raw_gamma = raw_gamma.strip().lower()
+        if raw_gamma == "default":
+            mode = str(getattr(self.cfg.critic, "gamma_default_mode", "one_minus_margin_over_max_episode_steps"))
+            if mode != "one_minus_margin_over_max_episode_steps":
+                raise ValueError(f"Unsupported CPIQL gamma_default_mode={mode!r}.")
+            max_steps = max(float(getattr(self.cfg.env, "max_episode_steps", 1) or 1), 1.0)
+            margin = float(getattr(self.cfg.critic, "gamma_default_margin", 2.0))
+            gamma = max(0.0, min(1.0, 1.0 - margin / max_steps))
+            self.cfg.env.gamma = gamma
+        else:
+            gamma = float(raw_gamma)
+            self.cfg.env.gamma = gamma
+        self.critic_step_gamma = gamma
+        self.critic_discount_gamma = (
+            gamma ** int(getattr(self.cfg.env, "act_horizon", 1))
+            if bool(getattr(self.cfg.critic, "gamma_use_act_horizon_power", True))
+            else gamma
+        )
+        return gamma
 
     def soft_update_target(self):
         tau = self.cfg.soft_update_tau
@@ -293,10 +295,15 @@ class CPIQLCriticMixin(CriticEvalMixinBase):
         progress_return: torch.Tensor,
         progress_mask: torch.Tensor,
         progress_weight: torch.Tensor,
+        use_anchor: bool = True,
     ) -> torch.Tensor:
         weights = progress_mask * progress_weight
         denom = weights.sum().clamp_min(1.0)
-        return (weights * (v_pred - progress_return).pow(2)).sum() / denom
+        if use_anchor:
+            pointwise_loss = (v_pred - progress_return).pow(2)
+        else:
+            pointwise_loss = F.relu(-v_pred).pow(2) + F.relu(v_pred - 1.0).pow(2)
+        return (weights * pointwise_loss).sum() / denom
 
     def _critic_progress_factors(
         self,
@@ -373,6 +380,13 @@ class CPIQLCriticMixin(CriticEvalMixinBase):
         return {"success": success_count, "failure": failure_count}
 
     def _configure_k0_balance_weights(self, dataset: Any) -> Dict[str, float]:
+        if self.use_blance_weight is False:
+            return{
+                "k0_success_count": -1.0,
+                "k0_failure_count": -1.0,
+                "success_class_weight": 1.0,
+                "failure_class_weight": 1.0,
+            }
         counts = self._collect_k0_balance_counts(dataset)
         success_count = int(counts["success"])
         failure_count = int(counts["failure"])
@@ -386,8 +400,6 @@ class CPIQLCriticMixin(CriticEvalMixinBase):
             total = float(success_count + failure_count)
             self.success_class_weight = total / (2.0 * float(success_count))
             self.failure_class_weight = total / (2.0 * float(failure_count))
-            self.success_class_weight = 1.0 #测试如果取消类别权重，看看训练情况
-            self.failure_class_weight = 1.0
 
         return {
             "k0_success_count": float(self.k0_success_count),
@@ -513,18 +525,20 @@ class CPIQLCriticMixin(CriticEvalMixinBase):
             high_value = value_all[:, high_idx:high_idx + 1]
             loss_terms = []
             mono = F.relu(low_value - high_value).pow(2).mean()
-            mono_total = mono_total + mono.detach() / pair_count
+            mono_total = mono_total + mono / pair_count
             if cfg.lambda_mono > 0:
                 loss_terms.append(float(cfg.lambda_mono) * mono / pair_count)
 
             if cfg.lambda_smooth > 0:
                 smooth = (high_value - low_value).pow(2).mean()
-                smooth_total = smooth_total + smooth.detach() / pair_count
+                smooth_total = smooth_total + smooth / pair_count
                 loss_terms.append(float(cfg.lambda_smooth) * smooth / pair_count)
 
             if loss_terms and do_backward:
                 torch.stack(loss_terms).sum().backward()
 
+        if do_backward:
+            return {"mono": mono_total.detach(), "smooth": smooth_total.detach()}
         return {"mono": mono_total, "smooth": smooth_total}
 
     def _update_critic_per_k_backward(self, batch: Dict[str, Any]) -> Dict[str, float]:
@@ -599,6 +613,7 @@ class CPIQLCriticMixin(CriticEvalMixinBase):
             progress_return,
             family_anchor_weight,
             torch.ones_like(family_anchor_weight),
+            use_anchor=bool(getattr(self.cfg.critic, "family_progress_anchor", True)),
         )
         loss_v_progress = loss_v_progress_success + loss_v_progress_failure
         reg = self._v_k_regularization(obs, k_values)

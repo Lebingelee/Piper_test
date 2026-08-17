@@ -26,6 +26,8 @@ class BaseRobotEnv(gym.Env, ABC):
         self.hz = hz
         self.dt = 1.0 / hz
         self.last_step_time = time.time()
+        self.env_control_mode = ""
+        self.controller_backend = ""
         
         # 核心：元数据字典，用于描述 obs 和 action 的结构
         # 必须由子类在初始化完成前填充

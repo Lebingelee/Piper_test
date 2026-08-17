@@ -10,6 +10,7 @@ SLAVE_CAN_LEFT="can_sl"
 SLAVE_CAN_RIGHT="can_sr"
 MAX_STEP="${MAX_STEP:-800}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
+PREVIEW="${PREVIEW:-auto}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -39,9 +40,17 @@ while [[ $# -gt 0 ]]; do
       MAX_STEP="$2"
       shift 2
       ;;
+    --preview)
+      PREVIEW="true"
+      shift
+      ;;
+    --no-preview|--headless)
+      PREVIEW="false"
+      shift
+      ;;
     *)
       echo "[Launcher] 未知参数: $1"
-      echo "用法: bash $0 [--master can_ml can_mr] [--slave can_sl can_sr] [--max-step N|-1]"
+      echo "用法: bash $0 [--master can_ml can_mr] [--slave can_sl can_sr] [--max-step N|-1] [--preview|--no-preview]"
       exit 2
       ;;
   esac
@@ -49,7 +58,30 @@ done
 
 export PYTHONPATH="$(pwd):$PYTHONPATH"
 
+if [[ "$PREVIEW" == "auto" ]]; then
+  if [[ -n "${SSH_CONNECTION:-}${SSH_TTY:-}" && -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
+    PREVIEW="false"
+  else
+    PREVIEW="true"
+  fi
+fi
+
+PREVIEW_ARGS=()
+case "$PREVIEW" in
+  true|1|yes|on)
+    PREVIEW_ARGS=(--preview)
+    ;;
+  false|0|no|off)
+    PREVIEW_ARGS=(--no-preview)
+    ;;
+  *)
+    echo "[Launcher] PREVIEW 只能是 auto/true/false，当前: $PREVIEW"
+    exit 2
+    ;;
+esac
+
 echo "[Launcher] 启动双臂 H5 录制模式..."
+echo "[Launcher] OpenCV 预览: $PREVIEW"
 "$PYTHON_BIN" -m agent_infra.Piper_Env.Record.recorder \
   -m h5 \
   -t "$TASK_NAME" \
@@ -59,4 +91,4 @@ echo "[Launcher] 启动双臂 H5 录制模式..."
   --master "$MASTER_CAN_LEFT" "$MASTER_CAN_RIGHT" \
   --slave "$SLAVE_CAN_LEFT" "$SLAVE_CAN_RIGHT" \
   --max-step "$MAX_STEP" \
-  #--no-preview
+  "${PREVIEW_ARGS[@]}"

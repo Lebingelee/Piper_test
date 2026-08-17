@@ -5,13 +5,12 @@ from typing import Dict, Optional
 import torch
 
 from agent_factory.data.normalization import get_action_normalizer
+from agent_factory.agents.mixins.module_builder import ModuleBuilderMixin
 from agent_factory.config.structure import DSRLCriticConfig
 from agent_factory.modules.critics.dsrl_critic import DSRLQEnsemble
-from agent_factory.modules.encoders.state_encoder import BaseStateEncoder
-from agent_factory.modules.encoders.visual_encoder import VisualEncoder
 
 
-class DSRLCriticMixin:
+class DSRLCriticMixin(ModuleBuilderMixin):
     CONFIG_CLASS = DSRLCriticConfig
     CONFIG_KEY = "critic"
     REQUIRED_KEYS = {"observations", "next_observations", "action", "reward", "terminated", "discount"}
@@ -24,32 +23,8 @@ class DSRLCriticMixin:
 
     def _build_critic(self):
         cfg: DSRLCriticConfig = self.cfg.critic
-        encoder_cfg = cfg.encoder
-        use_visual = getattr(self.cfg.dataset, "include_rgb", True)
-
-        visual_encoder = None
-        if use_visual:
-            visual_encoder = VisualEncoder(
-                in_channels=encoder_cfg.visual.in_channels,
-                out_dim=encoder_cfg.visual.out_dim,
-                backbone_type=encoder_cfg.visual.backbone_type,
-                pool_feature_map=encoder_cfg.visual.pool_feature_map,
-                use_group_norm=encoder_cfg.visual.use_group_norm,
-            )
-
-        proprio_dim = encoder_cfg.proprio_dim or self.cfg.env.proprio_dim
-
-        def build_encoder():
-            return BaseStateEncoder(
-                visual_encoder=copy.deepcopy(visual_encoder) if visual_encoder is not None else None,
-                proprio_dim=proprio_dim,
-                out_dim=encoder_cfg.out_dim,
-                num_cameras=self.cfg.env.num_cameras,
-                view_fusion=encoder_cfg.view_fusion,
-            )
-
-        self.action_critic_encoder = build_encoder()
-        self.noise_critic_encoder = build_encoder()
+        self.action_critic_encoder = self._build_encoder_from_config(cfg.encoder)
+        self.noise_critic_encoder = self._build_encoder_from_config(cfg.encoder)
 
         self.action_q_net = DSRLQEnsemble(
             state_encoder=self.action_critic_encoder,

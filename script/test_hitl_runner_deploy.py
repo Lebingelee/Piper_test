@@ -4,11 +4,12 @@ import sys
 import time
 
 import torch
+from omegaconf import OmegaConf
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from agent_factory.agents.registry import make_agent
-from agent_factory.config.manager import ConfigManager
+from agent_factory.config.resolution import general_resolve
 from agent_factory.env.env_factories import create_env
 from agent_factory.runner import HITLDeployRunner
 from agent_factory.runner.hitl_runner_deploy import (
@@ -27,6 +28,41 @@ DEFAULT_CHECKPOINT_PATH = (
     "run_results/piper_dual_merged_cpiql_dac/actor_step_60000.pth"
 )
 DEFAULT_SAVE_DIR = "data/hitl_deploy_runner_test"
+
+
+def _load_raw_config(path: str):
+    loaded = OmegaConf.load(path)
+    value = OmegaConf.to_container(loaded, resolve=False)
+    return value if isinstance(value, dict) else {}
+
+
+def _prepare_deploy_config(raw_cfg: dict, args, device: str) -> dict:
+    cfg = dict(raw_cfg)
+    env_cfg = dict(cfg.get("env") or {})
+    runner_cfg = dict(cfg.get("runner") or {})
+    runner_config = dict(runner_cfg.get("config") or {})
+
+    env_cfg["server_mode"] = False
+    if args.max_steps is not None:
+        env_cfg["max_episode_steps"] = int(args.max_steps)
+
+    runner_cfg["type"] = "hitl_deploy"
+    if args.control_hz > 0:
+        runner_cfg["control_hz"] = int(args.control_hz)
+    if args.save_dir:
+        runner_cfg["save_dir"] = args.save_dir
+
+    runner_config["hitl_enabled"] = True
+    runner_config["risk_check_hz"] = float(args.risk_check_hz)
+    runner_config["risk_use_safe_action"] = not bool(args.risk_no_safe_action_gap)
+    runner_cfg["config"] = runner_config
+
+    cfg["env"] = env_cfg
+    cfg["runner"] = runner_cfg
+    cfg.setdefault("train", {})
+    cfg["train"] = dict(cfg["train"] or {})
+    cfg["train"]["device"] = device
+    return cfg
 
 
 def _start_cameras_if_available(env, warmup: float):
@@ -87,21 +123,10 @@ def main():
         return
 
     print(f"[Test-HITL-Deploy] Loading config from {args.config}...")
-    cfg = ConfigManager.load_config(args.config)
-
     device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
-    cfg.device = device
-    cfg.train.device = device
-    cfg.env.server_mode = False
-    cfg.runner.hitl_enabled = True
-    if args.max_steps is not None:
-        cfg.env.max_episode_steps = int(args.max_steps)
-    if args.control_hz > 0:
-        cfg.runner.control_hz = int(args.control_hz)
-    if args.save_dir:
-        cfg.runner.save_dir = args.save_dir
-    cfg.runner.risk_check_hz = float(args.risk_check_hz)
-    cfg.runner.risk_use_safe_action = not bool(args.risk_no_safe_action_gap)
+    raw_cfg = _load_raw_config(args.config)
+    deploy_cfg = _prepare_deploy_config(raw_cfg, args, device)
+    cfg, runtime_spec = general_resolve(file_config=deploy_cfg)
     os.makedirs(cfg.runner.save_dir, exist_ok=True)
 
     if not args.skip_load:
@@ -120,8 +145,8 @@ def main():
         return
     _start_cameras_if_available(env, args.camera_warmup)
 
-    print(f"[Test-HITL-Deploy] Initializing Agent: {cfg.agent_type} ...")
-    agent = make_agent(cfg.agent_type, cfg)
+    print(f"[Test-HITL-Deploy] Initializing Agent: {runtime_spec['agent_type']} ...")
+    agent = make_agent(runtime_spec["agent_type"], cfg)
     if not args.skip_load:
         print(f"[Test-HITL-Deploy] Loading checkpoint from {args.checkpoint} ...")
         agent.load(args.checkpoint)

@@ -1,0 +1,5 @@
+stop_on_success: true
+save_on_done: true
+mark_success_from_info: true
+mark_failure_on_truncated: true
+min_save_steps: 1

@@ -45,15 +45,12 @@ class CPIQLQNet(nn.Module, _DiscreteKSelectorMixin):
         flat_action_dim: int,
         obs_horizon: int,
         hidden_dims: Sequence[int] = (256, 256),
-        k_embed_dim: int = 16,
-        k_hidden_dims: Sequence[int] = (32,),
         k_grid: Sequence[float] = (0.0, 1.0),
     ):
         super().__init__()
         self.encoder = state_encoder
         self.obs_horizon = int(obs_horizon)
         self.flat_action_dim = int(flat_action_dim)
-        del k_embed_dim, k_hidden_dims
 
         self.k_grid = [float(v) for v in k_grid]
         if not self.k_grid:
@@ -159,14 +156,11 @@ class CPIQLVNet(nn.Module, _DiscreteKSelectorMixin):
         state_encoder: BaseStateEncoder,
         obs_horizon: int,
         hidden_dims: Sequence[int] = (256, 256),
-        k_embed_dim: int = 16,
-        k_hidden_dims: Sequence[int] = (32,),
         k_grid: Sequence[float] = (0.0, 1.0),
     ):
         super().__init__()
         self.encoder = state_encoder
         self.obs_horizon = int(obs_horizon)
-        del k_embed_dim, k_hidden_dims
 
         self.k_grid = [float(v) for v in k_grid]
         if not self.k_grid:
