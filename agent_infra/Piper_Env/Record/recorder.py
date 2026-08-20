@@ -11,6 +11,13 @@ import sys
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Optional, Literal
 
+from agent_infra.Piper_Env.Record.h5_utils import (
+    DEFAULT_JPEG_QUALITY,
+    IMAGE_CODECS,
+    create_h5_dataset,
+    is_rgb_path,
+)
+
 # 尝试导入 LeRobot
 try:
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
@@ -61,10 +68,19 @@ class BaseRecorder(ABC):
 # --- 2. H5 录制实现 (每条轨迹独立文件) ---
 
 class H5TrajectoryRecorder(BaseRecorder):
-    def __init__(self, root_dir: str, task_name: str, env_meta: Dict):
+    def __init__(
+        self,
+        root_dir: str,
+        task_name: str,
+        env_meta: Dict,
+        image_codec: str = "jpeg",
+        jpeg_quality: int = DEFAULT_JPEG_QUALITY,
+    ):
         self.output_dir = os.path.join(root_dir, task_name, "h5_raw")
         os.makedirs(self.output_dir, exist_ok=True)
         self.env_meta = env_meta
+        self.image_codec = image_codec
+        self.jpeg_quality = jpeg_quality
         self.current_episode_data = []
         self.current_episode_id = 0
 
@@ -90,11 +106,14 @@ class H5TrajectoryRecorder(BaseRecorder):
                 self._save_dict_to_h5(sub_group, sub_list)
             else:
                 data = np.stack([step[k] for step in d_list])
-                # 对图像进行压缩
-                if k in ["rgb", "image", "depth"] or any(x in k for x in ["camera", "wrist", "front"]):
-                    group.create_dataset(k, data=data, compression="gzip", compression_opts=4)
-                else:
-                    group.create_dataset(k, data=data)
+                create_h5_dataset(
+                    group,
+                    k,
+                    data,
+                    rgb=is_rgb_path(group.name),
+                    image_codec=self.image_codec,
+                    jpeg_quality=self.jpeg_quality,
+                )
 
     def end_episode(self, success: bool):
         if len(self.current_episode_data) < 5: return
@@ -110,6 +129,8 @@ class H5TrajectoryRecorder(BaseRecorder):
             # 2. 保存元数据
             meta_g = f.create_group("meta")
             meta_g.create_dataset("env_meta", data=json.dumps(self.env_meta))
+            f.attrs["image_codec"] = self.image_codec
+            f.attrs["jpeg_quality"] = self.jpeg_quality
             f.attrs['success'] = success
             
         print(f"[H5Recorder] 轨迹已保存: {file_path}")
@@ -265,6 +286,8 @@ class DataCollectionManager:
                  teleop_on_start: bool = False,
                  task_description: Optional[str] = None,
                  vcodec: str = "h264",
+                 h5_image_codec: str = "jpeg",
+                 h5_jpeg_quality: int = DEFAULT_JPEG_QUALITY,
                  max_step: int = -1):
         
         self.env = env
@@ -277,6 +300,14 @@ class DataCollectionManager:
         self.teleop_on_start = teleop_on_start
         self.task_description = task_description
         self.vcodec = vcodec
+        if h5_image_codec not in IMAGE_CODECS:
+            raise ValueError(
+                f"h5_image_codec must be one of: {', '.join(IMAGE_CODECS)}"
+            )
+        if not 1 <= int(h5_jpeg_quality) <= 100:
+            raise ValueError("h5_jpeg_quality must be between 1 and 100")
+        self.h5_image_codec = h5_image_codec
+        self.h5_jpeg_quality = int(h5_jpeg_quality)
         if max_step == -1:
             self.max_step = 9999
             self._auto_delete_on_max_step = True
@@ -304,7 +335,13 @@ class DataCollectionManager:
         
         # 初始化录制器
         if mode == "h5":
-            self.recorder = H5TrajectoryRecorder(root_dir, self.task_name, self.env_meta)
+            self.recorder = H5TrajectoryRecorder(
+                root_dir,
+                self.task_name,
+                self.env_meta,
+                image_codec=self.h5_image_codec,
+                jpeg_quality=self.h5_jpeg_quality,
+            )
         else:
             self.recorder = LeRobotDatasetRecorder(
                 root_dir,
@@ -766,6 +803,18 @@ if __name__ == "__main__":
         help="LeRobot 视频编码，默认 h264，兼容性优于默认 AV1/libsvtav1",
     )
     parser.add_argument(
+        "--h5-image-codec",
+        choices=IMAGE_CODECS,
+        default="jpeg",
+        help="H5 RGB 图像编码；jpeg 显著节省空间，gzip 为旧版无损格式。默认 jpeg",
+    )
+    parser.add_argument(
+        "--h5-jpeg-quality",
+        type=int,
+        default=DEFAULT_JPEG_QUALITY,
+        help="H5 JPEG 质量（1-100），默认 85",
+    )
+    parser.add_argument(
         "--max-step",
         "--max_step",
         type=int,
@@ -799,6 +848,8 @@ if __name__ == "__main__":
         teleop_on_start=args.teleop_on_start,
         task_description=args.task_description,
         vcodec=args.vcodec,
+        h5_image_codec=args.h5_image_codec,
+        h5_jpeg_quality=args.h5_jpeg_quality,
         max_step=args.max_step,
     )
     try:

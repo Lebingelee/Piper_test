@@ -8,6 +8,14 @@ import h5py
 import numpy as np
 import torch
 
+from agent_infra.Piper_Env.Record.h5_utils import (
+    DEFAULT_JPEG_QUALITY,
+    IMAGE_CODECS,
+    copy_h5_dataset,
+    create_h5_dataset,
+    read_h5_dataset,
+)
+
 try:
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
     HAS_LEROBOT = True
@@ -59,17 +67,29 @@ def _get_traj_group(h5_file: h5py.File, traj_name: Optional[str]):
     return h5_file if traj_name is None else h5_file[traj_name]
 
 
-def _copy_group_recursive(src_group: h5py.Group, dst_group: h5py.Group):
+def _copy_group_recursive(
+    src_group: h5py.Group,
+    dst_group: h5py.Group,
+    image_codec: str = "jpeg",
+    jpeg_quality: int = DEFAULT_JPEG_QUALITY,
+):
     for key in src_group.keys():
         src_item = src_group[key]
         if isinstance(src_item, h5py.Group):
-            _copy_group_recursive(src_item, dst_group.create_group(key))
+            _copy_group_recursive(
+                src_item,
+                dst_group.create_group(key),
+                image_codec=image_codec,
+                jpeg_quality=jpeg_quality,
+            )
         else:
-            data = src_item[()]
-            compression = {}
-            if isinstance(data, np.ndarray) and data.ndim >= 3:
-                compression = {"compression": "gzip", "compression_opts": 4}
-            dst_group.create_dataset(key, data=data, **compression)
+            copy_h5_dataset(
+                src_item,
+                dst_group,
+                key,
+                image_codec=image_codec,
+                jpeg_quality=jpeg_quality,
+            )
 
 
 def _action_to_state_key(action_key: str, control_mode: str) -> str:
@@ -123,7 +143,7 @@ def _copy_or_convert_action_group(
                 )
             data = src_obs_group["state"][state_key][:action_len]
 
-        dst_action_group.create_dataset(action_key, data=data)
+        create_h5_dataset(dst_action_group, action_key, data)
 
 
 def _env_meta_signature(env_meta: Dict[str, Any]) -> str:
@@ -190,7 +210,11 @@ def _build_episode_signals(
 
 def _write_episode_signals(dst_traj: h5py.Group, signals: Dict[str, np.ndarray]):
     for key in ("success", "terminated", "truncated"):
-        dst_traj.create_dataset(key, data=np.asarray(signals[key], dtype=np.bool_))
+        create_h5_dataset(
+            dst_traj,
+            key,
+            np.asarray(signals[key], dtype=np.bool_),
+        )
 
 
 def _to_numpy(value: Any) -> np.ndarray:
@@ -358,6 +382,8 @@ def merge_h5_trajectories(
     input_paths: List[str],
     output_path: str,
     target_control_mode: Optional[str] = None,
+    image_codec: str = "jpeg",
+    jpeg_quality: int = DEFAULT_JPEG_QUALITY,
 ):
     h5_files = _collect_h5_files(input_paths)
     if not h5_files:
@@ -365,6 +391,10 @@ def merge_h5_trajectories(
 
     if target_control_mode is not None and target_control_mode not in {"joint", "pose", "delta_pose"}:
         raise ValueError("target_control_mode must be one of: joint, pose, delta_pose")
+    if image_codec not in IMAGE_CODECS:
+        raise ValueError(f"image_codec must be one of: {', '.join(IMAGE_CODECS)}")
+    if not 1 <= int(jpeg_quality) <= 100:
+        raise ValueError("jpeg_quality must be between 1 and 100")
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -394,7 +424,12 @@ def merge_h5_trajectories(
                 for traj_name in _list_traj_names(h5_in):
                     src_traj = _get_traj_group(h5_in, traj_name)
                     dst_traj = h5_out.create_group(f"traj_{merged_count}")
-                    _copy_group_recursive(src_traj["obs"], dst_traj.create_group("obs"))
+                    _copy_group_recursive(
+                        src_traj["obs"],
+                        dst_traj.create_group("obs"),
+                        image_codec=image_codec,
+                        jpeg_quality=jpeg_quality,
+                    )
                     _copy_or_convert_action_group(
                         src_traj["obs"],
                         src_traj["action"],
@@ -432,11 +467,15 @@ def merge_h5_trajectories(
             {
                 "sources": source_entries,
                 "target_control_mode": target_control_mode or "keep",
+                "image_codec": image_codec,
+                "jpeg_quality": int(jpeg_quality),
             },
         )
         h5_out.attrs["merged"] = True
         h5_out.attrs["num_trajectories"] = merged_count
         h5_out.attrs["control_mode"] = target_control_mode or "keep"
+        h5_out.attrs["image_codec"] = image_codec
+        h5_out.attrs["jpeg_quality"] = int(jpeg_quality)
 
     print(f"[Postprocess] Merged {merged_count} trajectories -> {output_path}")
 
@@ -516,7 +555,7 @@ def convert_h5_to_lerobot(
 
                 for role in rgb_roles:
                     frame[f"observation.images.{role}"] = torch.from_numpy(
-                        obs_group["rgb"][role][step_idx]
+                        read_h5_dataset(obs_group["rgb"][role], step_idx)
                     )
 
                 dataset.add_frame(frame)
@@ -544,13 +583,23 @@ def convert_h5_to_lerobot(
     print(f"[Postprocess] Converted {input_h5} -> LeRobot dataset at {output_dir}")
 
 
-def convert_lerobot_to_h5(input_dir: str, output_h5: str, env_meta_path: Optional[str] = None):
+def convert_lerobot_to_h5(
+    input_dir: str,
+    output_h5: str,
+    env_meta_path: Optional[str] = None,
+    image_codec: str = "jpeg",
+    jpeg_quality: int = DEFAULT_JPEG_QUALITY,
+):
     if not HAS_LEROBOT:
         raise ImportError("LeRobot is not installed; cannot convert LeRobot to H5.")
 
     input_dir = _normalize_lerobot_input_dir(input_dir)
     output_h5 = Path(output_h5)
     output_h5.parent.mkdir(parents=True, exist_ok=True)
+    if image_codec not in IMAGE_CODECS:
+        raise ValueError(f"image_codec must be one of: {', '.join(IMAGE_CODECS)}")
+    if not 1 <= int(jpeg_quality) <= 100:
+        raise ValueError("jpeg_quality must be between 1 and 100")
 
     env_meta = _load_lerobot_env_meta(input_dir, env_meta_path)
     episodes_file = input_dir / "episodes.json"
@@ -571,6 +620,8 @@ def convert_lerobot_to_h5(input_dir: str, output_h5: str, env_meta_path: Optiona
         _write_json_dataset(meta_group, "env_meta", env_meta)
         h5_out.attrs["merged"] = True
         h5_out.attrs["num_trajectories"] = len(dataset.meta.episodes)
+        h5_out.attrs["image_codec"] = image_codec
+        h5_out.attrs["jpeg_quality"] = int(jpeg_quality)
 
         for episode_idx, episode in enumerate(dataset.meta.episodes):
             from_idx = episode["dataset_from_index"]
@@ -594,13 +645,13 @@ def convert_lerobot_to_h5(input_dir: str, output_h5: str, env_meta_path: Optiona
             cursor = 0
             for key in state_keys:
                 dim = env_meta["obs"]["state"][key][0]
-                state_group.create_dataset(key, data=state_matrix[:, cursor:cursor + dim])
+                create_h5_dataset(state_group, key, state_matrix[:, cursor:cursor + dim])
                 cursor += dim
 
             cursor = 0
             for key in action_keys:
                 dim = env_meta["action"][key][0]
-                action_group.create_dataset(key, data=action_matrix[:, cursor:cursor + dim])
+                create_h5_dataset(action_group, key, action_matrix[:, cursor:cursor + dim])
                 cursor += dim
 
             if under_control_keys:
@@ -614,7 +665,7 @@ def convert_lerobot_to_h5(input_dir: str, output_h5: str, env_meta_path: Optiona
                         ])
                     else:
                         values = np.zeros((traj_len, 1), dtype=np.bool_)
-                    uc_group.create_dataset(name, data=values)
+                    create_h5_dataset(uc_group, name, values)
 
             if rgb_roles:
                 rgb_group = obs_group.create_group("rgb")
@@ -636,11 +687,13 @@ def convert_lerobot_to_h5(input_dir: str, output_h5: str, env_meta_path: Optiona
                                 f"[Postprocess] Failed to decode LeRobot video "
                                 f"{feature_key}; writing zero fallback. Error: {exc}"
                             )
-                    rgb_group.create_dataset(
+                    create_h5_dataset(
+                        rgb_group,
                         role,
                         data=values,
-                        compression="gzip",
-                        compression_opts=4,
+                        rgb=True,
+                        image_codec=image_codec,
+                        jpeg_quality=jpeg_quality,
                     )
 
             success = True
@@ -664,6 +717,18 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["joint", "pose", "delta_pose"],
         help="Optional target control mode for merged action conversion",
     )
+    merge_parser.add_argument(
+        "--image-codec",
+        choices=IMAGE_CODECS,
+        default="jpeg",
+        help="RGB H5 storage codec; jpeg saves much more space, gzip is lossless.",
+    )
+    merge_parser.add_argument(
+        "--jpeg-quality",
+        type=int,
+        default=DEFAULT_JPEG_QUALITY,
+        help="JPEG quality for RGB frames (1-100, default 85).",
+    )
 
     to_lerobot_parser = subparsers.add_parser("h5_to_lerobot", help="Convert raw/merged H5 to LeRobot")
     to_lerobot_parser.add_argument("-i", "--input", required=True, help="Input raw or merged H5 path")
@@ -683,6 +748,18 @@ def build_parser() -> argparse.ArgumentParser:
     to_h5_parser.add_argument("-i", "--input", required=True, help="Input LeRobot root directory")
     to_h5_parser.add_argument("-o", "--output", required=True, help="Output merged H5 path")
     to_h5_parser.add_argument("--env-meta", default=None, help="Optional env_meta.json path")
+    to_h5_parser.add_argument(
+        "--image-codec",
+        choices=IMAGE_CODECS,
+        default="jpeg",
+        help="RGB H5 storage codec; default jpeg.",
+    )
+    to_h5_parser.add_argument(
+        "--jpeg-quality",
+        type=int,
+        default=DEFAULT_JPEG_QUALITY,
+        help="JPEG quality for RGB frames (1-100, default 85).",
+    )
 
     return parser
 
@@ -692,11 +769,23 @@ def main():
     args = parser.parse_args()
 
     if args.command == "merge_h5":
-        merge_h5_trajectories(args.input, args.output, args.control_mode)
+        merge_h5_trajectories(
+            args.input,
+            args.output,
+            args.control_mode,
+            args.image_codec,
+            args.jpeg_quality,
+        )
     elif args.command == "h5_to_lerobot":
         convert_h5_to_lerobot(args.input, args.output, args.task_description, args.vcodec)
     elif args.command == "lerobot_to_h5":
-        convert_lerobot_to_h5(args.input, args.output, args.env_meta)
+        convert_lerobot_to_h5(
+            args.input,
+            args.output,
+            args.env_meta,
+            args.image_codec,
+            args.jpeg_quality,
+        )
 
 
 if __name__ == "__main__":

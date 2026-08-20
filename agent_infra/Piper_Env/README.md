@@ -279,6 +279,21 @@ H5 中会保存为：
 /obs/rgb/wrist_camera
 ```
 
+H5 图像存储默认使用 JPEG（质量 85），而状态、动作和 depth 使用带 shuffle 的 gzip 无损压缩；这比对已解码 RGB 像素直接使用 gzip 更节省空间。旧版 dense RGB H5 仍可读取，`merge_h5.sh` 默认会在合并时将其转换为 JPEG。若必须保持 RGB 像素无损，可使用：
+
+```bash
+H5_IMAGE_CODEC=gzip bash agent_infra/Piper_Env/Script/dual/collect_h5.sh
+H5_IMAGE_CODEC=gzip bash agent_infra/Piper_Env/Script/dual/merge_h5.sh
+```
+
+也可以调整 JPEG 质量：
+
+```bash
+H5_JPEG_QUALITY=90 bash agent_infra/Piper_Env/Script/dual/collect_h5.sh
+```
+
+JPEG H5 的 RGB 数据集形状是 `(frames,)`，每个元素是一帧 JPEG 字节；仓库内的 replay、visualize 和 H5/LeRobot 转换工具会自动解码，旧版 `(frames, C, H, W)` 数据集保持兼容。
+
 LeRobot 中会保存为：
 
 ```text

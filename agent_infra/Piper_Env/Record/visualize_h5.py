@@ -16,6 +16,8 @@ if "--play" not in sys.argv or not os.environ.get("DISPLAY"):
 import matplotlib.pyplot as plt
 import numpy as np
 
+from agent_infra.Piper_Env.Record.h5_utils import read_h5_dataset
+
 try:
     import cv2
 
@@ -100,7 +102,11 @@ def _select_trajectory(input_path: Path, k: int) -> Tuple[Path, Optional[str]]:
 
 
 def _read_leaf_group(group: h5py.Group) -> Dict[str, np.ndarray]:
-    return {key: group[key][()] for key in group.keys() if isinstance(group[key], h5py.Dataset)}
+    return {
+        key: read_h5_dataset(group[key])
+        for key in group.keys()
+        if isinstance(group[key], h5py.Dataset)
+    }
 
 
 def _get_traj_root(h5_file: h5py.File, traj_name: Optional[str]):
